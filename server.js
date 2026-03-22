@@ -1262,7 +1262,9 @@ function applyDeterministicInterceptors(state, messageText) {
   const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
   const preferredDateIsISO = preferred_date && ISO_DATE_PATTERN.test(preferred_date);
 
-  if (doctor_id && preferredDateIsISO && !preferred_time && booking_state !== BOOKING_STATES.AWAITING_SLOTS) {
+  if (doctor_id && preferredDateIsISO && !preferred_time &&
+      booking_state !== BOOKING_STATES.AWAITING_SLOTS &&
+      booking_state !== BOOKING_STATES.COLLECTING_DATE) {
     return {
       tool: 'verificar_disponibilidade',
       params: { doctor_id, date: preferred_date },
