@@ -63,6 +63,16 @@ const INTENCOES_DIRETAS = {
   'tirar duvida':     'info',
   'tirar uma duvida': 'info',
   'tenho uma duvida': 'info',
+  'qual medico':          'info',
+  'quais medicos':        'info',
+  'que medico':           'info',
+  'qual especialidade':   'info',
+  'quais especialidades': 'info',
+  'que especialidade':    'info',
+  'qual nome de especialidade e medico': 'info',
+  'quais sao os medicos': 'info',
+  'lista de medicos':     'info',
+  'medicos disponiveis':  'info',
   'valor':            'info',
   'precos':           'info',
   'preco':            'info',
@@ -3289,10 +3299,13 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           );
           if (fallbackResult?.success && fallbackResult?.dates?.length > 0) {
             // FIX 3: Resetar stuck_counter ao encontrar slots
+            // FIX loop: limpar preferred_date para que o guard rail não re-dispare com data antiga
             await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
               last_suggested_dates: fallbackResult.dates,
               booking_state: BOOKING_STATES.COLLECTING_DATE,
               stuck_counter_slots: 0,
+              preferred_date: null,
+              preferred_date_iso: null,
             });
             const dateList = fallbackResult.dates.slice(0, BUSCA_SLOTS_ABERTA_MAX)
               .map((d, i) => `${i + 1}) ${d.day_of_week}, ${d.formatted_date}`).join('\n');
@@ -3397,8 +3410,11 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           } else {
             // CORREÇÃO 2: Avançar booking_state para COLLECTING_DATE para evitar
             // que o interceptor dispare novamente na próxima mensagem (loop)
+            // FIX loop: limpar preferred_date para que o guard rail não re-dispare com data antiga
             await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
               booking_state: BOOKING_STATES.COLLECTING_DATE,
+              preferred_date: null,
+              preferred_date_iso: null,
             });
             decided = {
               decision_type: 'proceed',
