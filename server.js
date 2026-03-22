@@ -1515,10 +1515,12 @@ const buildSystemPrompt = (clinicSettings, doctors, services, kbContext, convers
 ESTADO ATUAL DA CONVERSA (FONTE DA VERDADE — NÃO PERGUNTE O QUE JÁ TEM):
 ${cs.patient_name ? `✅ Nome: ${cs.patient_name}` : '❌ Nome: PENDENTE'}
 ${cs.doctor_name ? `✅ Médico: ${cs.doctor_name} (${cs.specialty})` : cs.specialty ? `✅ Especialidade: ${cs.specialty}` : '❌ Médico/Especialidade: PENDENTE'}
-${cs.preferred_date ? `✅ Data: ${cs.preferred_date}` : '❌ Data: PENDENTE'}
+${cs.preferred_date && cs.booking_state !== 'collecting_date' ? `✅ Data: ${cs.preferred_date}` : '❌ Data: PENDENTE (aguardando usuário escolher nova data)'}
 ${cs.preferred_time ? `✅ Horário: ${cs.preferred_time}` : '❌ Horário: PENDENTE'}
 
 ESTÁGIO: ${cs.conversation_stage || 'greeting'}
+BOOKING_STATE: ${cs.booking_state || 'idle'}
+${cs.booking_state === 'collecting_date' ? '⚠️ ATENÇÃO: A data anterior não tinha horários disponíveis. NÃO chame verificar_disponibilidade. Pergunte ao paciente qual nova data prefere, ou chame buscar_proximas_datas para mostrar datas disponíveis.' : ''}
 PRÓXIMO CAMPO A COLETAR: ${(cs.pending_fields || [])[0] || 'NENHUM — PRONTO PARA CONFIRMAR'}
 ${cs.last_question_asked ? `ÚLTIMA PERGUNTA FEITA (NÃO REPITA): "${cs.last_question_asked}"` : ''}
 ${(cs.last_suggested_dates || []).length > 0
