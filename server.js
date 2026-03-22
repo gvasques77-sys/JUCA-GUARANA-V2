@@ -2892,7 +2892,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               doctor_id: updatedState.doctor_id,
               patient_name: updatedState.patient_name,
               patient_phone: envelope.from,
-              data: updatedState.preferred_date_iso || updatedState.preferred_date,
+              data: updatedState.preferred_date_iso || updatedState.last_suggested_dates?.[0]?.date || updatedState.preferred_date,
               horario: updatedState.preferred_time,
               service_id: updatedState.service_id || null,
               observacoes: null,
@@ -2900,8 +2900,12 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             { clinicId: envelope.clinic_id, userPhone: envelope.from }
           );
           console.log('[CONFIRM] criar_agendamento result:', JSON.stringify(agendResult));
+          const displayDate1 = updatedState.preferred_date_iso
+            || updatedState.last_suggested_dates?.[0]?.date
+            || updatedState.preferred_date
+            || 'Data a confirmar';
           const successMsg = agendResult?.success
-            ? `✅ Agendamento confirmado!\n\n👤 Paciente: ${updatedState.patient_name}\n👨‍⚕️ Médico: ${updatedState.doctor_name}\n📅 Data: ${updatedState.preferred_date_iso || updatedState.preferred_date}\n🕐 Horário: ${updatedState.preferred_time}\n\nAté lá! Se precisar de algo, é só chamar. 😊`
+            ? `✅ Agendamento confirmado!\n\n👤 Paciente: ${updatedState.patient_name}\n👨‍⚕️ Médico: ${updatedState.doctor_name}\n📅 Data: ${displayDate1}\n🕐 Horário: ${updatedState.preferred_time}\n\nAté lá! Se precisar de algo, é só chamar. 😊`
             : `Não foi possível concluir o agendamento: ${agendResult?.message || 'erro desconhecido'}. Tente novamente ou fale com um atendente.`;
           // Salvar appointmentId no state para processPostConversation usar
           const confirmedAppointmentId = agendResult?.appointment?.id || null;
@@ -2997,7 +3001,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               doctor_id: updatedState.doctor_id,
               patient_name: updatedState.patient_name,
               patient_phone: envelope.from,
-              data: updatedState.preferred_date_iso || updatedState.preferred_date,
+              data: updatedState.preferred_date_iso || updatedState.last_suggested_dates?.[0]?.date || updatedState.preferred_date,
               horario: updatedState.preferred_time,
               service_id: updatedState.service_id || null,
               observacoes: null,
@@ -3005,8 +3009,12 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             { clinicId: envelope.clinic_id, userPhone: envelope.from }
           );
           console.log('[CONFIRM-TEXT] criar_agendamento result:', JSON.stringify(agendResult));
+          const displayDate2 = updatedState.preferred_date_iso
+            || updatedState.last_suggested_dates?.[0]?.date
+            || updatedState.preferred_date
+            || 'Data a confirmar';
           const successMsg = agendResult?.success
-            ? `✅ Agendamento confirmado!\n\n👤 Paciente: ${updatedState.patient_name}\n👨‍⚕️ Médico: ${updatedState.doctor_name}\n📅 Data: ${updatedState.preferred_date_iso || updatedState.preferred_date}\n🕐 Horário: ${updatedState.preferred_time}\n\nAté lá! Se precisar de algo, é só chamar. 😊`
+            ? `✅ Agendamento confirmado!\n\n👤 Paciente: ${updatedState.patient_name}\n👨‍⚕️ Médico: ${updatedState.doctor_name}\n📅 Data: ${displayDate2}\n🕐 Horário: ${updatedState.preferred_time}\n\nAté lá! Se precisar de algo, é só chamar. 😊`
             : `Não foi possível concluir o agendamento: ${agendResult?.message || 'erro desconhecido'}. Tente novamente ou fale com um atendente.`;
           const confirmedAppointmentIdText = agendResult?.appointment?.id || null;
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
