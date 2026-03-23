@@ -2606,13 +2606,48 @@ if (intentoDireto) {
       // Usuário escolheu uma DATA da lista
       const chosen = sugDates[idx];
       const chosenDateISO = chosen.date_iso || chosen.date || null;
+      const cachedSlots = chosen.slots || []; // Horários já conhecidos do buscar_proximas_datas
+
       if (chosenDateISO) {
-        console.log(`[NUMERIC_INTERCEPT] "${numericMsg[1]}" → data ${chosenDateISO}`);
+        console.log(`[NUMERIC_INTERCEPT] "${numericMsg[1]}" → data ${chosenDateISO}, slots cacheados: ${cachedSlots.length}`);
+
+        if (cachedSlots.length > 0) {
+          // Slots já disponíveis — pular verificar_disponibilidade e mostrar direto
+          await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+            preferred_date: chosenDateISO,
+            preferred_date_iso: chosenDateISO,
+            booking_state: BOOKING_STATES.AWAITING_SLOTS,
+            last_suggested_slots: cachedSlots,
+          });
+          const slotsStr = cachedSlots.join(' · ');
+          const dateFormatted = formatDateBR(chosenDateISO);
+          const doctorDisplay = conversationState.doctor_name || 'Médico selecionado';
+          const displayMsg = `🕐 *${doctorDisplay}*\n📅 ${dateFormatted}\n\nHorários disponíveis:\n${slotsStr}\n\nQual horário você prefere?`;
+          await saveConversationTurn({
+            clinicId: envelope.clinic_id,
+            fromNumber: envelope.from,
+            correlationId: envelope.correlation_id,
+            userText: envelope.message_text,
+            assistantText: displayMsg,
+            intentGroup: 'scheduling',
+            intent: 'show_time_slots_cached',
+            slots: null,
+          });
+          clearTimeout(timeoutId);
+          return res.json({
+            correlation_id: envelope.correlation_id,
+            final_message: displayMsg,
+            actions: [],
+            debug: DEBUG ? { source: 'numeric_intercept_cached_slots', date: chosenDateISO, slots_count: cachedSlots.length } : undefined,
+          });
+        }
+
+        // Sem slots cacheados — deixar REGRA 1 chamar verificar_disponibilidade
         await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
           preferred_date: chosenDateISO,
           preferred_date_iso: chosenDateISO,
           booking_state: BOOKING_STATES.AWAITING_SLOTS,
-          last_suggested_slots: [], // Limpar slots antigos para REGRA 1 disparar
+          last_suggested_slots: [],
         });
         // Atualizar activeConvState para que mergeExtractedSlots parta do estado correto
         activeConvState = {
@@ -3324,9 +3359,11 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           updatedState.booking_state = BOOKING_STATES.COLLECTING_DATE;
           updatedState.last_suggested_dates = toolResult.dates;
 
-          const dateList = toolResult.dates.slice(0, 5)
-            .map((d, i) => `${i + 1}) ${d.day_of_week}, ${d.formatted_date}`).join('\n');
-          const weekMsg = `📅 *${updatedState.doctor_name || 'Médico selecionado'}* tem as seguintes datas disponíveis:\n\n${dateList}\n\nResponda com o número da data ou use os botões abaixo:`;
+          const dateList = toolResult.dates.slice(0, 5).map((d, i) => {
+            const slotsPreview = (d.slots || []).slice(0, 4).join(' · ');
+            return `${i + 1}) ${d.day_of_week}, ${d.formatted_date}${slotsPreview ? ` — ${slotsPreview}` : ''}`;
+          }).join('\n');
+          const weekMsg = `📅 *${updatedState.doctor_name || 'Médico selecionado'}* tem as seguintes datas disponíveis:\n\n${dateList}\n\nResponda com o número da data:`;
           await saveConversationTurn({
             clinicId: envelope.clinic_id,
             fromNumber: envelope.from,
