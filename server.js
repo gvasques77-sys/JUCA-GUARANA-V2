@@ -1281,7 +1281,7 @@ function applyDeterministicInterceptors(state, messageText) {
       booking_state !== BOOKING_STATES.COLLECTING_DATE) {
     return {
       tool: 'verificar_disponibilidade',
-      params: { doctor_id, date: preferred_date },
+      params: { doctor_id, data: preferred_date },
       reason: 'guard_rail: date_set_no_time',
     };
   }
@@ -3551,12 +3551,16 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         if (availResult?.success && availResult?.dates?.length > 0) {
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
             last_suggested_dates: availResult.dates,
+            last_suggested_slots: availResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
+            booking_state: BOOKING_STATES.COLLECTING_DATE,
           });
-          const dateList = availResult.dates.slice(0, 5)
-            .map((d, i) => `${i + 1}) ${d.day_of_week}, ${d.formatted_date}`).join('\n');
+          const dateList = availResult.dates.slice(0, 5).map((d, i) => {
+            const slotsPreview = (d.slots || []).slice(0, 4).join(' · ');
+            return `${i + 1}) ${d.day_of_week}, ${d.formatted_date}${slotsPreview ? ` — ${slotsPreview}` : ''}`;
+          }).join('\n');
           decided = {
             decision_type: 'proceed',
-            message: `Tenho os seguintes horários disponíveis com ${updatedState.doctor_name}:\n${dateList}\n\nQual dessas datas funciona melhor pra você?`,
+            message: `📅 *${updatedState.doctor_name || 'Médico selecionado'}* tem as seguintes datas disponíveis:\n\n${dateList}\n\nResponda com o número da data:`,
             actions: [{ type: 'log' }],
             confidence: 1,
           };
