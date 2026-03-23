@@ -1130,15 +1130,24 @@ function resolveDateChoice(userInput, suggestedDates = [], referenceDate = new D
   const input = userInput.toLowerCase().trim()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // remove acentos
 
-  // Referências posicionais (usam last_suggested_dates)
-  if (/prim[ea]ira?|^1[ao°]?$|^1$/.test(input) && suggestedDates[0]) {
-    return suggestedDates[0].date_iso || suggestedDates[0].formatted_date || null;
-  }
-  if (/segunda?|^2[ao°]?$|^2$/.test(input) && suggestedDates[1]) {
-    return suggestedDates[1].date_iso || suggestedDates[1].formatted_date || null;
-  }
-  if (/terceira?|^3[ao°]?$|^3$/.test(input) && suggestedDates[2]) {
-    return suggestedDates[2].date_iso || suggestedDates[2].formatted_date || null;
+  // Referências posicionais numéricas (1-9) — DEVEM ser checadas ANTES do singleDayMatch
+  // para que "4" signifique "4ª opção da lista" e não "dia 4 do mês"
+  if (suggestedDates.length > 0) {
+    // Número puro: "1", "2", "3", "4", "5" etc
+    const numMatch = input.match(/^(\d)°?[ao]?$/);
+    if (numMatch) {
+      const idx = parseInt(numMatch[1]) - 1;
+      if (idx >= 0 && idx < suggestedDates.length && suggestedDates[idx]) {
+        return suggestedDates[idx].date_iso || suggestedDates[idx].date || null;
+      }
+    }
+    // Palavras ordinais: "primeira", "segunda", "terceira", "quarta", "quinta"
+    const ORDINALS = ['prim', 'segund', 'terceir', 'quart', 'quint'];
+    for (let i = 0; i < ORDINALS.length; i++) {
+      if (input.startsWith(ORDINALS[i]) && suggestedDates[i]) {
+        return suggestedDates[i].date_iso || suggestedDates[i].date || null;
+      }
+    }
   }
 
   // Datas relativas
