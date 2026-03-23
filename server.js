@@ -2854,22 +2854,26 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
     // 7) CONFIDENCE GUARD + TAREFA 2 FIX 3: PRESERVAÇÃO DE ESTADO
     // Não resetar estado quando mensagem é inesperada mas há fluxo ativo.
     // ======================================================
-    if (!extracted || extracted.confidence < 0.6) {
-      // FIX 3: Verificar se há fluxo ativo de agendamento
-      const activeBookingStates = [
-        BOOKING_STATES.COLLECTING_SPECIALTY,
-        BOOKING_STATES.COLLECTING_DATE,
-        BOOKING_STATES.AWAITING_SLOTS,
-        BOOKING_STATES.COLLECTING_TIME,
-        BOOKING_STATES.CONFIRMING,
-        BOOKING_STATES.COLLECTING_DOCTOR,
-      ];
-      const hasActiveFlow = activeBookingStates.includes(conversationState.booking_state)
-        || conversationState.doctor_id
-        || conversationState.specialty;
+    // FIX: Pré-computar hasActiveFlow e isCancelIntent antes do guard
+    // para também capturar mensagens off-topic com alta confiança (ex: "oi tudo bem")
+    const activeBookingStates = [
+      BOOKING_STATES.COLLECTING_SPECIALTY,
+      BOOKING_STATES.COLLECTING_DATE,
+      BOOKING_STATES.AWAITING_SLOTS,
+      BOOKING_STATES.COLLECTING_TIME,
+      BOOKING_STATES.CONFIRMING,
+      BOOKING_STATES.COLLECTING_DOCTOR,
+    ];
+    const hasActiveFlow = activeBookingStates.includes(conversationState.booking_state)
+      || !!conversationState.doctor_id
+      || !!conversationState.specialty;
+    const isCancelIntent = /cancelar|desistir|não quero|nao quero|para|chega/i.test(envelope.message_text);
 
-      // Verificar se é intenção explícita de cancelar
-      const isCancelIntent = /cancelar|desistir|não quero|nao quero|para|chega/i.test(envelope.message_text);
+    // Disparar guard se: (a) sem extração / confiança baixa OU
+    // (b) fluxo ativo + mensagem off-topic (cumprimentos, chit-chat) — evita que
+    //     o LLM gere um cumprimento e destrua o contexto de agendamento
+    if (!extracted || extracted.confidence < 0.6 ||
+        (hasActiveFlow && !isCancelIntent && extracted?.intent_group === 'other')) {
 
       if (hasActiveFlow && !isCancelIntent) {
         // FIX 3: Preservar estado — incrementar stuck_counter_off_topic
@@ -3426,18 +3430,25 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           if (fallbackResult?.success && fallbackResult?.dates?.length > 0) {
             // FIX 3: Resetar stuck_counter ao encontrar slots
             // FIX loop: limpar preferred_date para que o guard rail não re-dispare com data antiga
+            // FIX: Também salvar doctor_id para que o interceptor numérico funcione corretamente
             await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
               last_suggested_dates: fallbackResult.dates,
+              last_suggested_slots: fallbackResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
               booking_state: BOOKING_STATES.COLLECTING_DATE,
               stuck_counter_slots: 0,
               preferred_date: null,
               preferred_date_iso: null,
+              ...(updatedState.doctor_id ? { doctor_id: updatedState.doctor_id } : {}),
+              ...(updatedState.doctor_name ? { doctor_name: updatedState.doctor_name } : {}),
             });
             const dateList = fallbackResult.dates.slice(0, BUSCA_SLOTS_ABERTA_MAX)
-              .map((d, i) => `${i + 1}) ${d.day_of_week}, ${d.formatted_date}`).join('\n');
+              .map((d, i) => {
+                const slotsPreview = (d.slots || []).slice(0, 4).join(' · ');
+                return `${i + 1}) ${d.day_of_week}, ${d.formatted_date}${slotsPreview ? ` — ${slotsPreview}` : ''}`;
+              }).join('\n');
             decided = {
               decision_type: 'proceed',
-              message: `Essa data não tem horários disponíveis. As próximas datas com vagas para ${updatedState.doctor_name} são:\n${dateList}\n\nQual dessas datas funciona melhor?`,
+              message: `Essa data não tem horários disponíveis. As próximas datas com vagas para ${updatedState.doctor_name} são:\n\n${dateList}\n\nQual dessas datas funciona melhor?`,
               actions: [buildDateListAction(fallbackResult.dates, updatedState.doctor_name)],
               confidence: 1,
             };
@@ -3468,11 +3479,14 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       } else if (toolResult?.success) {
         if (forcedCall.tool === 'buscar_proximas_datas' && toolResult?.dates?.length > 0) {
           // FIX v5.3: Salvar datas e slots no state para uso pelos botões "Esta semana / Próxima semana"
+          // FIX: Também salvar doctor_id/doctor_name para que o interceptor numérico funcione corretamente
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
             last_suggested_dates: toolResult.dates,
             last_suggested_slots: toolResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
             booking_state: BOOKING_STATES.COLLECTING_DATE,
             stuck_counter_slots: 0,
+            ...(updatedState.doctor_id ? { doctor_id: updatedState.doctor_id } : {}),
+            ...(updatedState.doctor_name ? { doctor_name: updatedState.doctor_name } : {}),
           });
           updatedState.booking_state = BOOKING_STATES.COLLECTING_DATE;
           updatedState.last_suggested_dates = toolResult.dates;
@@ -3627,6 +3641,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             last_suggested_dates: availResult.dates,
             last_suggested_slots: availResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
             booking_state: BOOKING_STATES.COLLECTING_DATE,
+            ...(updatedState.doctor_id ? { doctor_id: updatedState.doctor_id } : {}),
+            ...(updatedState.doctor_name ? { doctor_name: updatedState.doctor_name } : {}),
           });
           const dateList = availResult.dates.slice(0, 5).map((d, i) => {
             const slotsPreview = (d.slots || []).slice(0, 4).join(' · ');
@@ -3895,10 +3911,17 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             const flatSlots = datesWithSlots.flatMap(d =>
               (d.slots || []).map(s => ({ date: d.date, time: s }))
             );
+            // FIX: Extrair doctor_id dos args da tool call para preservar no estado
+            const toolArgs = safeJsonParse(toolCall.function.arguments) || {};
+            const doctorIdFromTool = toolArgs.doctor_id || updatedState.doctor_id || null;
+            const doctorFromList = doctorIdFromTool ? doctors.find(d => d.id === doctorIdFromTool) : null;
+            const doctorNameFromTool = doctorFromList?.name || updatedState.doctor_name || null;
             await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
               last_suggested_dates: datesWithSlots,
               last_suggested_slots: flatSlots,
               booking_state: BOOKING_STATES.COLLECTING_DATE,
+              ...(doctorIdFromTool ? { doctor_id: doctorIdFromTool } : {}),
+              ...(doctorNameFromTool ? { doctor_name: doctorNameFromTool } : {}),
             });
             // FIX: Retornar lista de datas diretamente (mesmo formato do forced path)
             // Evita que o LLM reformule a mensagem usando apenas slots_count do service,
