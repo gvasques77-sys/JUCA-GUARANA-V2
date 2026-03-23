@@ -940,30 +940,38 @@ async function mergeExtractedSlots(currentState, extractedSlots, doctors, servic
   // BUG 2 FIX: Resolver datas relativas (incluindo dias da semana) ANTES de salvar no estado
   const dateInput = extractedSlots.preferred_date_text || extractedSlots.preferred_date;
   if (dateInput) {
-    // Tentar resolver para ISO (YYYY-MM-DD) antes de salvar
-    const resolvedDate = resolveDateChoice(
-      dateInput,
-      currentState.last_suggested_dates || [],
-      new Date()
-    );
-    if (resolvedDate) {
-      updates.preferred_date = resolvedDate;
-      updates.preferred_date_iso = resolvedDate;
-      console.log(`[BUG2-FIX] Data resolvida: "${dateInput}" → ${resolvedDate}`);
+    // DATE-GUARD: não sobrescrever data ISO já escolhida quando usuário está em etapa posterior
+    const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
+    const existingDateISO = updates.preferred_date_iso || currentState.preferred_date_iso || updates.preferred_date || currentState.preferred_date;
+    const existingIsValid = isoPattern.test(existingDateISO || '');
+    const protectedStates = [BOOKING_STATES.AWAITING_SLOTS, BOOKING_STATES.COLLECTING_TIME, BOOKING_STATES.CONFIRMING, BOOKING_STATES.BOOKED];
+    const currentBookingState = updates.booking_state || currentState.booking_state;
+    if (existingIsValid && protectedStates.includes(currentBookingState)) {
+      console.log(`[DATE-GUARD] preferred_date já definido (${existingDateISO}) em estado ${currentBookingState} — ignorando extração LLM: "${dateInput}"`);
     } else {
-      // Tentar resolver como data ISO direta (YYYY-MM-DD)
-      const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
-      if (isoPattern.test(dateInput)) {
-        updates.preferred_date = dateInput;
-        updates.preferred_date_iso = dateInput;
-        console.log(`[BUG2-FIX] Data ISO direta: "${dateInput}"`);
+      // Tentar resolver para ISO (YYYY-MM-DD) antes de salvar
+      const resolvedDate = resolveDateChoice(
+        dateInput,
+        currentState.last_suggested_dates || [],
+        new Date()
+      );
+      if (resolvedDate) {
+        updates.preferred_date = resolvedDate;
+        updates.preferred_date_iso = resolvedDate;
+        console.log(`[BUG2-FIX] Data resolvida: "${dateInput}" → ${resolvedDate}`);
       } else {
-        // Manter texto original — LLM vai tentar interpretar depois
-        updates.preferred_date = dateInput;
-        if (extractedSlots.preferred_date_iso) {
-          updates.preferred_date_iso = extractedSlots.preferred_date_iso;
+        if (isoPattern.test(dateInput)) {
+          updates.preferred_date = dateInput;
+          updates.preferred_date_iso = dateInput;
+          console.log(`[BUG2-FIX] Data ISO direta: "${dateInput}"`);
+        } else {
+          // Manter texto original — LLM vai tentar interpretar depois
+          updates.preferred_date = dateInput;
+          if (extractedSlots.preferred_date_iso) {
+            updates.preferred_date_iso = extractedSlots.preferred_date_iso;
+          }
+          console.log(`[BUG2-FIX] Data não resolvida, mantendo texto: "${dateInput}"`);
         }
-        console.log(`[BUG2-FIX] Data não resolvida, mantendo texto: "${dateInput}"`);
       }
     }
   }
@@ -1375,8 +1383,8 @@ function formatDateBR(dateStr) {
  * FIX v5.2: Inclui preço da consulta e informações de convênios.
  */
 async function buildConfirmationMessage(state, doctorName, clinicName, clinicId) {
-  const { preferred_date, preferred_time, patient_name, doctor_id } = state;
-  const dateFormatted = formatDateBR(preferred_date);
+  const { preferred_date_iso, preferred_date, preferred_time, patient_name, doctor_id } = state;
+  const dateFormatted = formatDateBR(preferred_date_iso || preferred_date);
   const doctor = doctorName || state.doctor_name || '[MÉDICO]';
   const clinic = clinicName || 'Clínica';
 
@@ -2923,7 +2931,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               doctor_id: updatedState.doctor_id,
               patient_name: updatedState.patient_name,
               patient_phone: envelope.from,
-              data: updatedState.preferred_date_iso || updatedState.last_suggested_dates?.[0]?.date || updatedState.preferred_date,
+              data: updatedState.preferred_date_iso || updatedState.preferred_date,
               horario: updatedState.preferred_time,
               service_id: updatedState.service_id || null,
               observacoes: null,
@@ -2932,7 +2940,6 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           );
           console.log('[CONFIRM] criar_agendamento result:', JSON.stringify(agendResult));
           const displayDate1 = updatedState.preferred_date_iso
-            || updatedState.last_suggested_dates?.[0]?.date
             || updatedState.preferred_date
             || 'Data a confirmar';
           const successMsg = agendResult?.success
@@ -3032,7 +3039,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               doctor_id: updatedState.doctor_id,
               patient_name: updatedState.patient_name,
               patient_phone: envelope.from,
-              data: updatedState.preferred_date_iso || updatedState.last_suggested_dates?.[0]?.date || updatedState.preferred_date,
+              data: updatedState.preferred_date_iso || updatedState.preferred_date,
               horario: updatedState.preferred_time,
               service_id: updatedState.service_id || null,
               observacoes: null,
@@ -3041,7 +3048,6 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           );
           console.log('[CONFIRM-TEXT] criar_agendamento result:', JSON.stringify(agendResult));
           const displayDate2 = updatedState.preferred_date_iso
-            || updatedState.last_suggested_dates?.[0]?.date
             || updatedState.preferred_date
             || 'Data a confirmar';
           const successMsg = agendResult?.success
@@ -3479,7 +3485,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           // FIX v5.2: Filtrar horários passados no dia atual
           const now = new Date();
           const todayStr = now.toISOString().split('T')[0];
-          const requestedDate = forcedCall.params?.date || '';
+          const requestedDate = forcedCall.params?.data || forcedCall.params?.date || updatedState.preferred_date_iso || updatedState.preferred_date || '';
           let filteredSlots = slots;
           if (requestedDate === todayStr) {
             const currentTotalMin = now.getHours() * 60 + now.getMinutes();
