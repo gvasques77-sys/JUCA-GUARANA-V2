@@ -1271,8 +1271,13 @@ function applyDeterministicInterceptors(state, messageText) {
   const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
   const preferredDateIsISO = preferred_date && ISO_DATE_PATTERN.test(preferred_date);
 
+  // Não chamar se: (1) já mostramos os horários e aguardamos escolha OU (2) aguardando usuário
+  // escolher a data da lista (COLLECTING_DATE). Quando o interceptor numérico dispara, ele limpa
+  // last_suggested_slots e muda para AWAITING_SLOTS, forçando a passagem pela regra abaixo.
+  const alreadyShowingSlots = booking_state === BOOKING_STATES.AWAITING_SLOTS &&
+    (state.last_suggested_slots?.length > 0);
   if (doctor_id && preferredDateIsISO && !preferred_time &&
-      booking_state !== BOOKING_STATES.AWAITING_SLOTS &&
+      !alreadyShowingSlots &&
       booking_state !== BOOKING_STATES.COLLECTING_DATE) {
     return {
       tool: 'verificar_disponibilidade',
@@ -1738,6 +1743,9 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), GLOBAL_TIMEOUT_MS);
 
+  // Rastrear se o lock foi adquirido para liberar no finally
+  let processingLockAcquired = false;
+
   try {
     // ======================================================
     // 0) DEDUP POR WAMID (inbound_dedup)
@@ -1777,9 +1785,11 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
     // passavam pelo guard porque ambas liam "sem resposta recente" antes
     // de qualquer uma terminar. Esta função SQL é atômica (UPDATE condicional).
     // ======================================================
-    const COOLDOWN_SECONDS = Math.floor(Number(process.env.SESSION_COOLDOWN_MS || 10000) / 1000);
+    // Cooldown de 3s: suficiente para deduplicar webhooks repetidos sem bloquear conversas normais.
+    // O lock é liberado no bloco finally ao final do processamento (sucesso ou erro).
+    const COOLDOWN_SECONDS = Math.floor(Number(process.env.SESSION_COOLDOWN_MS || 3000) / 1000);
     try {
-      const { data: lockAcquired, error: lockErr } = await supabase
+      const { data: lockResult, error: lockErr } = await supabase
         .rpc('try_acquire_processing_lock', {
           p_clinic_id: envelope.clinic_id,
           p_from_number: envelope.from,
@@ -1788,7 +1798,7 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
 
       if (lockErr) {
         log.warn({ err: String(lockErr) }, '[LOCK] Erro ao tentar lock — continuando');
-      } else if (lockAcquired === false) {
+      } else if (lockResult === false) {
         log.info({ from: envelope.from }, '[LOCK] Lock não adquirido — requisição duplicada ignorada');
         clearTimeout(timeoutId);
         return res.json({
@@ -1796,6 +1806,8 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
           final_message: null,
           actions: [{ type: 'cooldown_active' }],
         });
+      } else {
+        processingLockAcquired = true; // Lock adquirido com sucesso
       }
     } catch (lockEx) {
       log.warn({ err: String(lockEx) }, '[LOCK] Exceção no lock — continuando sem proteção');
@@ -2600,7 +2612,16 @@ if (intentoDireto) {
           preferred_date: chosenDateISO,
           preferred_date_iso: chosenDateISO,
           booking_state: BOOKING_STATES.AWAITING_SLOTS,
+          last_suggested_slots: [], // Limpar slots antigos para REGRA 1 disparar
         });
+        // Atualizar activeConvState para que mergeExtractedSlots parta do estado correto
+        activeConvState = {
+          ...activeConvState,
+          preferred_date: chosenDateISO,
+          preferred_date_iso: chosenDateISO,
+          booking_state: BOOKING_STATES.AWAITING_SLOTS,
+          last_suggested_slots: [],
+        };
         extracted = {
           intent_group: 'scheduling',
           intent: 'schedule_new',
@@ -3303,7 +3324,9 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           updatedState.booking_state = BOOKING_STATES.COLLECTING_DATE;
           updatedState.last_suggested_dates = toolResult.dates;
 
-          const weekMsg = `📅 *${updatedState.doctor_name || 'Médico selecionado'}*\n\nPara quando você gostaria de agendar sua consulta?`;
+          const dateList = toolResult.dates.slice(0, 5)
+            .map((d, i) => `${i + 1}) ${d.day_of_week}, ${d.formatted_date}`).join('\n');
+          const weekMsg = `📅 *${updatedState.doctor_name || 'Médico selecionado'}* tem as seguintes datas disponíveis:\n\n${dateList}\n\nResponda com o número da data ou use os botões abaixo:`;
           await saveConversationTurn({
             clinicId: envelope.clinic_id,
             fromNumber: envelope.from,
@@ -3999,6 +4022,15 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         ? { error_message: errMessage, error_name: errName }
         : undefined,
     });
+  } finally {
+    clearTimeout(timeoutId);
+    // Liberar lock atômico ao final do processamento (sucesso ou erro).
+    // Ao setar last_processed_at no passado, a próxima mensagem passa imediatamente.
+    if (processingLockAcquired && envelope?.clinic_id && envelope?.from) {
+      updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+        last_processed_at: '1970-01-01T00:00:00.000Z',
+      }).catch(() => {});
+    }
   }
 });
 
