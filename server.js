@@ -1139,21 +1139,24 @@ function findClosestSlot(timeStr, slots) {
  */
 function resolveDateChoice(userInput, suggestedDates = [], referenceDate = new Date()) {
   if (!userInput) return null;
-  const input = userInput.toLowerCase().trim()
+  const input = String(userInput).toLowerCase().trim()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // remove acentos
 
-  // Referências posicionais numéricas (1-9) — DEVEM ser checadas ANTES do singleDayMatch
-  // para que "4" signifique "4ª opção da lista" e não "dia 4 do mês"
+  // ── PRIORIDADE 1: índice numérico posicional ────────────────────────────
+  // "4", "4)", "4." → sempre usa a lista interna, nunca o texto
+  // Captura: dígito puro OU dígito no início seguido de ) . espaço ou fim
   if (suggestedDates.length > 0) {
-    // Número puro: "1", "2", "3", "4", "5" etc
-    const numMatch = input.match(/^(\d)°?[ao]?$/);
+    const numMatch = input.match(/^(\d)[).\s]|^(\d)$/);
     if (numMatch) {
-      const idx = parseInt(numMatch[1]) - 1;
+      const digit = numMatch[1] || numMatch[2];
+      const idx = parseInt(digit) - 1;
       if (idx >= 0 && idx < suggestedDates.length && suggestedDates[idx]) {
-        return suggestedDates[idx].date_iso || suggestedDates[idx].date || null;
+        const picked = suggestedDates[idx];
+        console.log(`[resolveDateChoice] índice "${digit}" → ${picked.date_iso || picked.date}`);
+        return picked.date_iso || picked.date || null;
       }
     }
-    // Palavras ordinais: "primeira", "segunda", "terceira", "quarta", "quinta"
+    // Palavras ordinais: "primeira", "segunda opção" etc.
     const ORDINALS = ['prim', 'segund', 'terceir', 'quart', 'quint'];
     for (let i = 0; i < ORDINALS.length; i++) {
       if (input.startsWith(ORDINALS[i]) && suggestedDates[i]) {
@@ -1162,50 +1165,64 @@ function resolveDateChoice(userInput, suggestedDates = [], referenceDate = new D
     }
   }
 
-  // Datas relativas
+  // ── PRIORIDADE 2: data explícita DD/MM ou DD/MM/YYYY ───────────────────
+  // Verificar ANTES do nome do dia da semana — dado explícito sempre vence inferência
+  const dayMatch = input.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+  if (dayMatch) {
+    const d = parseInt(dayMatch[1]);
+    const m = parseInt(dayMatch[2]) - 1;
+    // Aceitar apenas dia 1-31 e mês 1-12 para evitar confusão MM/DD
+    if (d >= 1 && d <= 31 && m >= 0 && m <= 11) {
+      const rawYear = dayMatch[3] ? parseInt(dayMatch[3]) : null;
+      const year = rawYear
+        ? (rawYear < 100 ? 2000 + rawYear : rawYear)
+        : referenceDate.getFullYear();
+      const candidate = new Date(year, m, d);
+      if (isNaN(candidate.getTime())) return null;
+      // Se ano explícito foi fornecido, retornar direto (sem ajuste de ano)
+      if (rawYear) return formatISO(candidate);
+      if (candidate >= referenceDate) return formatISO(candidate);
+      return formatISO(new Date(year + 1, m, d));
+    }
+  }
+
+  // ── PRIORIDADE 3: datas relativas ──────────────────────────────────────
   if (/hoje/.test(input)) return formatISO(referenceDate);
   if (/amanha/.test(input)) return formatISO(addDays(referenceDate, 1));
   if (/semana que vem|proxima semana/.test(input)) return formatISO(addDays(referenceDate, 7));
 
-  // Dias da semana: próxima ocorrência (BUG 2 FIX: suporte expandido a variações)
+  // ── PRIORIDADE 4: dia da semana (apenas quando não há data explícita) ──
+  // Só chega aqui se NENHUM DD/MM foi encontrado no input
   const WEEKDAY_MAP = [
     { pattern: /\bsegunda([-\s]feira)?\b/, day: 1 },
-    { pattern: /\b(terca|terça)([-\s]feira)?\b/, day: 2 },
+    { pattern: /\b(terca|terca)([-\s]feira)?\b/, day: 2 },
     { pattern: /\bquarta([-\s]feira)?\b/, day: 3 },
     { pattern: /\bquinta([-\s]feira)?\b/, day: 4 },
     { pattern: /\bsexta([-\s]feira)?\b/, day: 5 },
-    { pattern: /\b(sabado|sábado)\b/, day: 6 },
+    { pattern: /\b(sabado)\b/, day: 6 },
     { pattern: /\bdomingo\b/, day: 0 },
   ];
   for (const { pattern, day } of WEEKDAY_MAP) {
     if (pattern.test(input)) {
       const resolved = formatISO(nextWeekday(referenceDate, day));
-      console.log(`[resolveDateChoice] Dia da semana detectado: '${userInput}' → ${resolved}`);
+      console.log(`[resolveDateChoice] Dia da semana detectado (sem data explícita): '${userInput}' → ${resolved}`);
       return resolved;
     }
   }
 
-  // Dia do mês: "dia 15", "15/03", "15 de março"
-  const dayMatch = input.match(/(\d{1,2})\/(\d{1,2})/);
-  if (dayMatch) {
-    const d = parseInt(dayMatch[1]);
-    const m = parseInt(dayMatch[2]) - 1;
-    const year = referenceDate.getFullYear();
-    const candidate = new Date(year, m, d);
-    if (candidate >= referenceDate) return formatISO(candidate);
-    return formatISO(new Date(year + 1, m, d));
-  }
-
+  // ── PRIORIDADE 5: dia do mês ("dia 15", "15") ──────────────────────────
   const singleDayMatch = input.match(/^dia\s+(\d{1,2})$|^(\d{1,2})$/);
   if (singleDayMatch) {
     const d = parseInt(singleDayMatch[1] || singleDayMatch[2]);
-    const now = referenceDate;
-    let candidate = new Date(now.getFullYear(), now.getMonth(), d);
-    if (candidate < now) candidate = new Date(now.getFullYear(), now.getMonth() + 1, d);
-    if (!isNaN(candidate.getTime())) return formatISO(candidate);
+    if (d >= 1 && d <= 31) {
+      const now = referenceDate;
+      let candidate = new Date(now.getFullYear(), now.getMonth(), d);
+      if (candidate < now) candidate = new Date(now.getFullYear(), now.getMonth() + 1, d);
+      if (!isNaN(candidate.getTime())) return formatISO(candidate);
+    }
   }
 
-  return null; // não conseguiu resolver — LLM vai tentar de novo
+  return null; // não conseguiu resolver
 }
 
 /**
@@ -2625,12 +2642,13 @@ if (intentoDireto) {
   };
   step++;
 } else {
-  // ── INTERCEPTOR NUMÉRICO: "4" → 4ª data da lista ──────────────────
-  // Antes de chamar o LLM, verificar se mensagem é número simples
-  // e há last_suggested_dates ou last_suggested_slots salvos
-  const numericMsg = envelope.message_text.trim().match(/^([1-9])$/);
+  // ── INTERCEPTOR NUMÉRICO: "4", "4)", "4) Quinta-feira, ..." → 4ª opção da lista ──
+  // Captura: dígito puro OU dígito seguido de ) . ou espaço (usuário copiou a opção inteira)
+  // O índice vem SEMPRE do número, nunca do texto da opção — determinístico.
+  const numericMsg = envelope.message_text.trim().match(/^([1-9])[).\s]|^([1-9])$/);
   if (numericMsg) {
-    const idx = parseInt(numericMsg[1]) - 1;
+    const numericDigit = numericMsg[1] || numericMsg[2]; // grupo 1 = "4)[...]", grupo 2 = "4" puro
+    const idx = parseInt(numericDigit) - 1;
     const sugDates = conversationState?.last_suggested_dates || [];
     const sugSlots = conversationState?.last_suggested_slots || [];
 
@@ -2641,7 +2659,7 @@ if (intentoDireto) {
       const cachedSlots = chosen.slots || []; // Horários já conhecidos do buscar_proximas_datas
 
       if (chosenDateISO) {
-        console.log(`[NUMERIC_INTERCEPT] "${numericMsg[1]}" → data ${chosenDateISO}, slots cacheados: ${cachedSlots.length}`);
+        console.log(`[NUMERIC_INTERCEPT] "${numericDigit}" → data ${chosenDateISO}, slots cacheados: ${cachedSlots.length}`);
 
         if (cachedSlots.length > 0) {
           // Slots já disponíveis — pular verificar_disponibilidade e mostrar direto
@@ -2703,7 +2721,7 @@ if (intentoDireto) {
       // Usuário escolheu um HORÁRIO da lista
       const chosenSlot = typeof sugSlots[idx] === 'string' ? sugSlots[idx] : sugSlots[idx]?.time;
       if (chosenSlot) {
-        console.log(`[NUMERIC_INTERCEPT] "${numericMsg[1]}" → horário ${chosenSlot}`);
+        console.log(`[NUMERIC_INTERCEPT] "${numericDigit}" → horário ${chosenSlot}`);
         await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
           preferred_time: chosenSlot,
         });
