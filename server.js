@@ -1278,15 +1278,15 @@ function applyDeterministicInterceptors(state, messageText) {
     console.log(`[INTERCEPTOR] preferred_date não-ISO detectado: "${preferred_date}" — aguardando resolução`);
   }
 
-  // REGRA 2: Tem médico, mas não tem data → DEVE buscar próximas datas disponíveis
-  // CORREÇÃO 2: Adicionar COLLECTING_DATE na lista de estados bloqueados para evitar loop
-  // Quando booking_state já é COLLECTING_DATE, as datas já foram apresentadas ao paciente
-  // e o sistema deve aguardar a escolha do paciente, não buscar novamente.
+  // REGRA 2: Tem médico, mas não tem data → buscar próximas datas disponíveis
   if (doctor_id && !preferred_date &&
       booking_state !== BOOKING_STATES.AWAITING_SLOTS &&
-      booking_state !== BOOKING_STATES.COLLECTING_DATE && // CORREÇÃO 2: evita loop após apresentar datas
       booking_state !== BOOKING_STATES.CONFIRMING &&
       booking_state !== BOOKING_STATES.BOOKED) {
+    // Se já tem datas sugeridas e está em COLLECTING_DATE, não buscar de novo
+    if (booking_state === BOOKING_STATES.COLLECTING_DATE && state.last_suggested_dates?.length > 0) {
+      return null; // aguardar escolha do paciente
+    }
     return {
       tool: 'buscar_proximas_datas',
       params: { doctor_id, dias: BUSCA_SLOTS_ABERTA_DIAS, busca_aberta: true },
