@@ -1368,13 +1368,18 @@ function validateAvailabilityResult(toolResult, tool) {
  */
 function formatDateBR(dateStr) {
   if (!dateStr) return '[DATA NÃO DEFINIDA]';
+  const s = String(dateStr);
   // Se já é formato pt-BR (DD/MM/YYYY), retornar direto
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  // Parsear ISO YYYY-MM-DD diretamente (evita problemas de toLocaleDateString/ICU no Railway)
+  const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
   try {
-    const date = new Date(dateStr + 'T00:00:00');
+    const date = new Date(s + 'T00:00:00');
+    if (isNaN(date.getTime())) return s;
     return date.toLocaleDateString('pt-BR');
   } catch {
-    return dateStr;
+    return s;
   }
 }
 
@@ -1384,7 +1389,9 @@ function formatDateBR(dateStr) {
  */
 async function buildConfirmationMessage(state, doctorName, clinicName, clinicId) {
   const { preferred_date_iso, preferred_date, preferred_time, patient_name, doctor_id } = state;
-  const dateFormatted = formatDateBR(preferred_date_iso || preferred_date);
+  const rawDate = preferred_date_iso || preferred_date;
+  console.log(`[CONFIRM-MSG] preferred_date_iso=${JSON.stringify(preferred_date_iso)} preferred_date=${JSON.stringify(preferred_date)} rawDate=${JSON.stringify(rawDate)}`);
+  const dateFormatted = formatDateBR(rawDate);
   const doctor = doctorName || state.doctor_name || '[MÉDICO]';
   const clinic = clinicName || 'Clínica';
 
