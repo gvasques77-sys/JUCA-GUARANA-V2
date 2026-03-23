@@ -1382,6 +1382,37 @@ function validateAvailabilityResult(toolResult, tool) {
 }
 
 // ======================================================
+// LIST MESSAGE — SELEÇÃO DE DATA (Meta WhatsApp Cloud API)
+// ======================================================
+
+/**
+ * Gera action `send_interactive_list` para que o n8n envie uma list message
+ * da Meta WhatsApp Cloud API com até 5 datas selecionáveis.
+ * Row id = dígito "1"–"5" → compatível com o interceptor numérico existente.
+ *
+ * Limites Meta: header ≤60 · body ≤1024 · button ≤20 · row title ≤24 · row desc ≤72
+ */
+function buildDateListAction(dates, doctorName) {
+  const rows = (dates || []).slice(0, 5).map((d, i) => {
+    const slotsPreview = (d.slots || []).slice(0, 3).join(' · ');
+    return {
+      id: String(i + 1),
+      title: `${i + 1}) ${d.day_of_week}, ${d.formatted_date}`.substring(0, 24),
+      description: (slotsPreview || `${d.slots_count || '?'} horários`).substring(0, 72),
+    };
+  });
+  return {
+    type: 'send_interactive_list',
+    payload: {
+      header: 'Datas disponíveis',
+      body: `*${(doctorName || 'Médico selecionado').substring(0, 55)}* — escolha uma data:`,
+      button: 'Ver datas',
+      sections: [{ title: 'Datas disponíveis', rows }],
+    },
+  };
+}
+
+// ======================================================
 // CONFIRMAÇÃO OBRIGATÓRIA ANTES DE AGENDAR
 // ======================================================
 
@@ -3407,7 +3438,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             decided = {
               decision_type: 'proceed',
               message: `Essa data não tem horários disponíveis. As próximas datas com vagas para ${updatedState.doctor_name} são:\n${dateList}\n\nQual dessas datas funciona melhor?`,
-              actions: [{ type: 'log' }],
+              actions: [buildDateListAction(fallbackResult.dates, updatedState.doctor_name)],
               confidence: 1,
             };
             skipSchedulingAgent = true;
@@ -3465,15 +3496,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           return res.json({
             correlation_id: envelope.correlation_id,
             final_message: weekMsg,
-            actions: [{
-              type: 'send_interactive_buttons',
-              payload: {
-                buttons: [
-                  { id: 'week_current', title: '📆 Esta semana' },
-                  { id: 'week_next',    title: '📆 Próxima semana' },
-                ],
-              },
-            }],
+            actions: [buildDateListAction(toolResult.dates, updatedState.doctor_name)],
             debug: DEBUG ? { booking_state: BOOKING_STATES.COLLECTING_DATE, dates_count: toolResult.dates.length } : undefined,
           });
         } else if (forcedCall.tool === 'buscar_proximas_datas' && (!toolResult?.dates || toolResult.dates.length === 0)) {
@@ -3612,7 +3635,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           decided = {
             decision_type: 'proceed',
             message: `📅 *${updatedState.doctor_name || 'Médico selecionado'}* tem as seguintes datas disponíveis:\n\n${dateList}\n\nResponda com o número da data:`,
-            actions: [{ type: 'log' }],
+            actions: [buildDateListAction(availResult.dates, updatedState.doctor_name)],
             confidence: 1,
           };
           skipSchedulingAgent = true;
@@ -3900,15 +3923,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               return res.json({
                 correlation_id: envelope.correlation_id,
                 final_message: weekMsg,
-                actions: [{
-                  type: 'send_interactive_buttons',
-                  payload: {
-                    buttons: [
-                      { id: 'week_current', title: '📆 Esta semana' },
-                      { id: 'week_next',    title: '📆 Próxima semana' },
-                    ],
-                  },
-                }],
+                actions: [buildDateListAction(datesWithSlots, updatedState.doctor_name)],
                 debug: DEBUG ? { booking_state: BOOKING_STATES.COLLECTING_DATE, dates_count: datesWithSlots.length, source: 'llm_buscar_proximas_datas' } : undefined,
               });
             }
