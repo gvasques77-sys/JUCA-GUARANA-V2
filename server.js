@@ -2581,6 +2581,58 @@ if (intentoDireto) {
   };
   step++;
 } else {
+  // ── INTERCEPTOR NUMÉRICO: "4" → 4ª data da lista ──────────────────
+  // Antes de chamar o LLM, verificar se mensagem é número simples
+  // e há last_suggested_dates ou last_suggested_slots salvos
+  const numericMsg = envelope.message_text.trim().match(/^([1-9])$/);
+  if (numericMsg) {
+    const idx = parseInt(numericMsg[1]) - 1;
+    const sugDates = conversationState?.last_suggested_dates || [];
+    const sugSlots = conversationState?.last_suggested_slots || [];
+
+    if (sugDates.length > 0 && idx < sugDates.length) {
+      // Usuário escolheu uma DATA da lista
+      const chosen = sugDates[idx];
+      const chosenDateISO = chosen.date_iso || chosen.date || null;
+      if (chosenDateISO) {
+        console.log(`[NUMERIC_INTERCEPT] "${numericMsg[1]}" → data ${chosenDateISO}`);
+        await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+          preferred_date: chosenDateISO,
+          preferred_date_iso: chosenDateISO,
+          booking_state: BOOKING_STATES.AWAITING_SLOTS,
+        });
+        extracted = {
+          intent_group: 'scheduling',
+          intent: 'schedule_new',
+          slots: { preferred_date_text: chosenDateISO, preferred_date_iso: chosenDateISO },
+          missing_fields: [],
+          confidence: 1.0,
+          source: 'numeric_intercept',
+        };
+        step++;
+      }
+    } else if (sugSlots.length > 0 && idx < sugSlots.length) {
+      // Usuário escolheu um HORÁRIO da lista
+      const chosenSlot = typeof sugSlots[idx] === 'string' ? sugSlots[idx] : sugSlots[idx]?.time;
+      if (chosenSlot) {
+        console.log(`[NUMERIC_INTERCEPT] "${numericMsg[1]}" → horário ${chosenSlot}`);
+        await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+          preferred_time: chosenSlot,
+        });
+        extracted = {
+          intent_group: 'scheduling',
+          intent: 'schedule_new',
+          slots: { preferred_time: chosenSlot },
+          missing_fields: [],
+          confidence: 1.0,
+          source: 'numeric_intercept_slot',
+        };
+        step++;
+      }
+    }
+  }
+
+  if (!extracted) {
   const extraction = await openai.chat.completions.create(
     {
       model: OPENAI_MODEL,
@@ -2616,6 +2668,7 @@ if (intentoDireto) {
   }
 
   step++;
+  } // fecha if (!extracted) do bloco LLM
 }
 
 if (DEBUG) {
