@@ -2117,8 +2117,21 @@ if (previousMessages.length === 0) {
         intent: 'greeting',
         slots: null,
       });
-      // CORREÇÃO 4: Marcar que greeting foi enviado no conversation_state
+      // Reset de agendamento ao iniciar nova conversa — limpa estado antigo que poderia
+      // causar data errada na confirmação (bug: preferred_date de sessão anterior persistia)
       await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+        booking_state: BOOKING_STATES.IDLE,
+        preferred_date: null,
+        preferred_date_iso: null,
+        preferred_time: null,
+        patient_name: null,
+        doctor_id: null,
+        doctor_name: null,
+        specialty: null,
+        last_suggested_dates: [],
+        last_suggested_slots: [],
+        stuck_counter_slots: 0,
+        stuck_counter_off_topic: 0,
         greeting_sent_at: new Date().toISOString(),
         conversation_stage: 'greeting',
       });
@@ -3137,6 +3150,28 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       updatedState.booking_state !== BOOKING_STATES.BOOKED &&
       extracted?.intent_group === 'scheduling'
     ) {
+      // Validar data antes de confirmar: deve ser ISO e não estar no passado
+      const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const dateToConfirm = updatedState.preferred_date_iso || updatedState.preferred_date;
+      const dateIsValid = dateToConfirm && ISO_RE.test(dateToConfirm) &&
+        new Date(dateToConfirm + 'T00:00:00') >= new Date(new Date().toISOString().split('T')[0] + 'T00:00:00');
+      if (!dateIsValid) {
+        console.warn(`[CONFIRMING] Data inválida ou passada detectada: "${dateToConfirm}" — resetando para coletar nova data`);
+        await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+          preferred_date: null,
+          preferred_date_iso: null,
+          booking_state: BOOKING_STATES.COLLECTING_DATE,
+          last_suggested_dates: [],
+          last_suggested_slots: [],
+        });
+        decided = {
+          decision_type: 'ask_missing',
+          message: `Para quando você gostaria de agendar com ${updatedState.doctor_name || 'o médico'}? Me diga a data de preferência.`,
+          actions: [],
+          confidence: 1,
+        };
+        // Pular para o final — não entrar em CONFIRMING com data inválida
+      } else {
       // Todos os campos preenchidos → entrar em CONFIRMING
       await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
         booking_state: BOOKING_STATES.CONFIRMING,
@@ -3178,6 +3213,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         }],
         debug: DEBUG ? { booking_state: BOOKING_STATES.CONFIRMING } : undefined,
       });
+      } // fecha else (data válida)
     }
 
     // ======================================================
