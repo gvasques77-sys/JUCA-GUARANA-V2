@@ -944,9 +944,13 @@ async function mergeExtractedSlots(currentState, extractedSlots, doctors, servic
     const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
     const existingDateISO = updates.preferred_date_iso || currentState.preferred_date_iso || updates.preferred_date || currentState.preferred_date;
     const existingIsValid = isoPattern.test(existingDateISO || '');
+    // Só proteger datas FUTURAS (ou hoje) — datas passadas devem ser sobrescritas
+    const existingDateObj = existingIsValid ? new Date((existingDateISO || '') + 'T00:00:00') : null;
+    const todayStart = new Date(new Date().toISOString().split('T')[0] + 'T00:00:00');
+    const existingIsFuture = existingDateObj && !isNaN(existingDateObj.getTime()) && existingDateObj >= todayStart;
     const protectedStates = [BOOKING_STATES.AWAITING_SLOTS, BOOKING_STATES.COLLECTING_TIME, BOOKING_STATES.CONFIRMING, BOOKING_STATES.BOOKED];
     const currentBookingState = updates.booking_state || currentState.booking_state;
-    if (existingIsValid && protectedStates.includes(currentBookingState)) {
+    if (existingIsValid && existingIsFuture && protectedStates.includes(currentBookingState)) {
       console.log(`[DATE-GUARD] preferred_date já definido (${existingDateISO}) em estado ${currentBookingState} — ignorando extração LLM: "${dateInput}"`);
     } else {
       // Tentar resolver para ISO (YYYY-MM-DD) antes de salvar
@@ -3137,7 +3141,22 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         });
 
       } else {
-        // Resposta ambígua → reenviar mensagem de confirmação
+        // Resposta ambígua → validar data antes de reenviar confirmação
+        const ISO_RE_AMB = /^\d{4}-\d{2}-\d{2}$/;
+        const ambDateRaw = updatedState.preferred_date_iso || updatedState.preferred_date;
+        const ambDateValid = ambDateRaw && ISO_RE_AMB.test(ambDateRaw) &&
+          new Date(ambDateRaw + 'T00:00:00') >= new Date(new Date().toISOString().split('T')[0] + 'T00:00:00');
+        if (!ambDateValid) {
+          console.warn(`[CONFIRMING] Data inválida/passada no estado CONFIRMING: "${ambDateRaw}" — resetando`);
+          await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+            preferred_date: null, preferred_date_iso: null, preferred_time: null,
+            booking_state: BOOKING_STATES.COLLECTING_DATE,
+            last_suggested_dates: [], last_suggested_slots: [],
+          });
+          const resetMsg = `Parece que houve um problema com a data do agendamento. Vamos recomeçar — para quando você gostaria de agendar?`;
+          clearTimeout(timeoutId);
+          return res.json({ correlation_id: envelope.correlation_id, final_message: resetMsg, actions: [] });
+        }
         const ambiguousConfirmMsg = await buildConfirmationMessage(updatedState, updatedState.doctor_name, clinicRules?.name, envelope.clinic_id);
         // CORREÇÃO 2: Salvar histórico antes de retornar
         await saveConversationTurn({
