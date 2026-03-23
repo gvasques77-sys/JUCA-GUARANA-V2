@@ -1266,8 +1266,9 @@ function resolveTimeChoice(userInput, suggestedSlots = []) {
     if (noite) return noite;
   }
 
-  // Horário explícito: "14h", "14:00", "às 14", "14h30", "2pm"
-  const hourMatch = input.match(/(\d{1,2})(?::(\d{2}))?h?/);
+  // Horário explícito: "14h", "14:00", "às 14", "14h30", "13h30", "2pm"
+  // Fix: [h:] como separador aceita tanto "13:30" quanto "13h30" (notação europeia)
+  const hourMatch = input.match(/(\d{1,2})(?:[h:](\d{2}))?h?/);
   if (hourMatch) {
     const h = hourMatch[1].padStart(2, '0');
     const m = hourMatch[2] || '00';
@@ -3876,6 +3877,41 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               last_suggested_slots: flatSlots,
               booking_state: BOOKING_STATES.COLLECTING_DATE,
             });
+            // FIX: Retornar lista de datas diretamente (mesmo formato do forced path)
+            // Evita que o LLM reformule a mensagem usando apenas slots_count do service,
+            // garantindo que o que é exibido = o que está salvo em last_suggested_dates
+            if (datesWithSlots.length > 0) {
+              const dateListFormatted = datesWithSlots.slice(0, 5).map((d, i) => {
+                const slotsPreview = (d.slots || []).slice(0, 4).join(' · ');
+                return `${i + 1}) ${d.day_of_week}, ${d.formatted_date}${slotsPreview ? ` — ${slotsPreview}` : ''}`;
+              }).join('\n');
+              const weekMsg = `📅 *${updatedState.doctor_name || 'Médico selecionado'}* tem as seguintes datas disponíveis:\n\n${dateListFormatted}\n\nResponda com o número da data:`;
+              await saveConversationTurn({
+                clinicId: envelope.clinic_id,
+                fromNumber: envelope.from,
+                correlationId: envelope.correlation_id,
+                userText: envelope.message_text,
+                assistantText: weekMsg,
+                intentGroup: 'scheduling',
+                intent: 'buscar_proximas_datas',
+                slots: null,
+              });
+              clearTimeout(timeoutId);
+              return res.json({
+                correlation_id: envelope.correlation_id,
+                final_message: weekMsg,
+                actions: [{
+                  type: 'send_interactive_buttons',
+                  payload: {
+                    buttons: [
+                      { id: 'week_current', title: '📆 Esta semana' },
+                      { id: 'week_next',    title: '📆 Próxima semana' },
+                    ],
+                  },
+                }],
+                debug: DEBUG ? { booking_state: BOOKING_STATES.COLLECTING_DATE, dates_count: datesWithSlots.length, source: 'llm_buscar_proximas_datas' } : undefined,
+              });
+            }
           }
           if (toolCall.function.name === 'verificar_disponibilidade' && toolResult?.success) {
             const availSlots = toolResult.available_slots || toolResult.slots || [];
