@@ -1355,11 +1355,14 @@ function applyDeterministicInterceptors(state, messageText) {
  */
 function validateAvailabilityResult(toolResult, tool) {
   if (!toolResult || toolResult.error) {
+    // FIX: Tratar erros da tool como "sem vagas" para ativar o fallback buscar_proximas_datas
+    // em vez de mostrar "Não encontrei horários" diretamente. Casos comuns: MEDICO_INVALIDO
+    // (doctor_id perdido), DATA_PASSADA (data inválida), ou falha de rede.
     return {
       valid: false,
-      // CORREÇÃO 2: Mensagem de fallback não promete busca futura (evita expectativa de loop)
+      noSlots: tool === 'verificar_disponibilidade',
       fallback: tool === 'verificar_disponibilidade'
-        ? 'Não encontrei horários disponíveis nessa data. Gostaria de tentar outra data ou outro médico?'
+        ? 'Não há vagas nessa data. Buscando as próximas datas disponíveis...'
         : 'Não consegui buscar as datas disponíveis no momento. Tente novamente em instantes.',
     };
   }
@@ -2724,7 +2727,90 @@ if (intentoDireto) {
           });
         }
 
-        // Sem slots cacheados — deixar REGRA 1 chamar verificar_disponibilidade
+        // Sem slots cacheados — chamar verificar_disponibilidade inline para garantir
+        // que o usuário sempre veja os horários (evita "Não encontrei horários" por falha de cache)
+        const doctorIdForCheck = conversationState.doctor_id || null;
+        if (doctorIdForCheck) {
+          console.log(`[NUMERIC_INTERCEPT] Sem cache — chamando verificar_disponibilidade inline para ${chosenDateISO}`);
+          const inlineResult = await executeSchedulingTool(
+            'verificar_disponibilidade',
+            { doctor_id: doctorIdForCheck, data: chosenDateISO },
+            { clinicId: envelope.clinic_id, userPhone: envelope.from }
+          );
+          const inlineSlots = inlineResult?.available_slots || inlineResult?.slots || [];
+          if (inlineResult?.success && Array.isArray(inlineSlots) && inlineSlots.length > 0) {
+            // Encontrou slots — salvar e retornar direto (mesmo caminho do cache hit)
+            await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+              preferred_date: chosenDateISO,
+              preferred_date_iso: chosenDateISO,
+              booking_state: BOOKING_STATES.AWAITING_SLOTS,
+              last_suggested_slots: inlineSlots.map(s => ({ date: chosenDateISO, time: s })),
+            });
+            const slotsStr = inlineSlots.join(' · ');
+            const dateFormatted = formatDateBR(chosenDateISO);
+            const doctorDisplay = conversationState.doctor_name || 'Médico selecionado';
+            const displayMsg = `🕐 *${doctorDisplay}*\n📅 ${dateFormatted}\n\nHorários disponíveis:\n${slotsStr}\n\nQual horário você prefere?`;
+            await saveConversationTurn({
+              clinicId: envelope.clinic_id,
+              fromNumber: envelope.from,
+              correlationId: envelope.correlation_id,
+              userText: envelope.message_text,
+              assistantText: displayMsg,
+              intentGroup: 'scheduling',
+              intent: 'show_time_slots_inline',
+              slots: null,
+            });
+            clearTimeout(timeoutId);
+            return res.json({
+              correlation_id: envelope.correlation_id,
+              final_message: displayMsg,
+              actions: [],
+              debug: DEBUG ? { source: 'numeric_intercept_inline_verify', date: chosenDateISO, slots_count: inlineSlots.length } : undefined,
+            });
+          }
+          // Sem slots nessa data → tentar buscar próximas datas disponíveis
+          console.log(`[NUMERIC_INTERCEPT] Inline sem slots — buscando próximas datas para ${doctorIdForCheck}`);
+          const inlineFallback = await executeSchedulingTool(
+            'buscar_proximas_datas',
+            { doctor_id: doctorIdForCheck, dias: BUSCA_SLOTS_ABERTA_DIAS, busca_aberta: true },
+            { clinicId: envelope.clinic_id, userPhone: envelope.from }
+          );
+          if (inlineFallback?.success && inlineFallback?.dates?.length > 0) {
+            await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+              last_suggested_dates: inlineFallback.dates,
+              last_suggested_slots: inlineFallback.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
+              booking_state: BOOKING_STATES.COLLECTING_DATE,
+              preferred_date: null,
+              preferred_date_iso: null,
+              ...(conversationState.doctor_id ? { doctor_id: conversationState.doctor_id } : {}),
+              ...(conversationState.doctor_name ? { doctor_name: conversationState.doctor_name } : {}),
+            });
+            const dateList = inlineFallback.dates.slice(0, 5).map((d, i) => {
+              const sp = (d.slots || []).slice(0, 4).join(' · ');
+              return `${i + 1}) ${d.day_of_week}, ${d.formatted_date}${sp ? ` — ${sp}` : ''}`;
+            }).join('\n');
+            const fallbackMsg = `Essa data não tem horários disponíveis. As próximas datas com vagas são:\n\n${dateList}\n\nQual dessas datas funciona melhor?`;
+            await saveConversationTurn({
+              clinicId: envelope.clinic_id,
+              fromNumber: envelope.from,
+              correlationId: envelope.correlation_id,
+              userText: envelope.message_text,
+              assistantText: fallbackMsg,
+              intentGroup: 'scheduling',
+              intent: 'numeric_intercept_no_slots_fallback',
+              slots: null,
+            });
+            clearTimeout(timeoutId);
+            return res.json({
+              correlation_id: envelope.correlation_id,
+              final_message: fallbackMsg,
+              actions: [buildDateListAction(inlineFallback.dates, conversationState.doctor_name)],
+              debug: DEBUG ? { source: 'numeric_intercept_inline_fallback', date: chosenDateISO } : undefined,
+            });
+          }
+        }
+
+        // Sem doctor_id ou sem datas disponíveis — cair no fluxo normal (REGRA 1)
         await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
           preferred_date: chosenDateISO,
           preferred_date_iso: chosenDateISO,
