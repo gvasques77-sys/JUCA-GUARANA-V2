@@ -2763,25 +2763,42 @@ const isInActiveBooking = bookingStateNow &&
 if (messageHasInfoQuestion) {
   console.log(`[INFO_INTERCEPTOR] Pergunta informativa detectada: "${envelope.message_text.substring(0, 60)}" | booking_state=${bookingStateNow}`);
 
-  // FONTE 1: KB de convênios/preços/pagamento
-  let infoAnswer = '';
-  try {
-    const { data: kbInfo } = await supabase
-      .from('clinic_kb')
-      .select('title, content')
-      .eq('clinic_id', envelope.clinic_id)
-      .or('title.ilike.%onvênio%,title.ilike.%alor%,title.ilike.%pagamento%,title.ilike.%preço%,title.ilike.%plano%')
-      .limit(4);
+  // ── STEP 1: Identificar médico (estado > nome na mensagem) ──────────────
+  let doctorIdForInfo   = conversationState?.doctor_id   || null;
+  let doctorNameForInfo = conversationState?.doctor_name || null;
+  let doctorSpecialty   = conversationState?.specialty   || null;
 
-    if (kbInfo && kbInfo.length > 0) {
-      infoAnswer = kbInfo.map(k => `*${k.title}*: ${k.content}`).join('\n\n');
-    }
-  } catch (e) { console.warn('[INFO_INTERCEPTOR] KB fetch error:', e.message); }
+  if (!doctorIdForInfo) {
+    // Tenta detectar nome do médico na mensagem ("quanto valor de marcos?")
+    try {
+      const { data: allDocs } = await supabase
+        .from('doctors')
+        .select('id, name, specialty')
+        .eq('clinic_id', envelope.clinic_id);
+      if (allDocs && allDocs.length > 0) {
+        const msgNorm = envelope.message_text.toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        for (const doc of allDocs) {
+          const parts = doc.name.toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(' ');
+          // Só considera partes com 3+ caracteres para evitar falsos positivos
+          if (parts.some(p => p.length >= 3 && msgNorm.includes(p))) {
+            doctorIdForInfo   = doc.id;
+            doctorNameForInfo = doc.name;
+            doctorSpecialty   = doc.specialty || doctorSpecialty;
+            console.log(`[INFO_INTERCEPTOR] Médico detectado na mensagem: ${doc.name} (${doc.id})`);
+            break;
+          }
+        }
+      }
+    } catch (e) { console.warn('[INFO_INTERCEPTOR] doctor lookup error:', e.message); }
+  }
 
-  // FONTE 2: doctor_services — buscar valor real do médico escolhido
-  // R$ 350 vem DAQUI, não da KB. Sem isso, o bot sempre responde genérico.
-  const doctorIdForInfo = conversationState?.doctor_id;
-  if (!infoAnswer && doctorIdForInfo) {
+  // ── STEP 2: PRIORIDADE — preço real do médico (doctor_services) ─────────
+  // Isso é sempre a resposta correta quando um médico está identificado.
+  // KB genérica só é usada como fallback quando NÃO há médico identificado.
+  let priceAnswer = '';
+  if (doctorIdForInfo) {
     try {
       const { data: dsRows } = await supabase
         .from('doctor_services')
@@ -2792,36 +2809,97 @@ if (messageHasInfoQuestion) {
       if (dsRows && dsRows.length > 0) {
         const priceLines = dsRows.map(ds => {
           const price = ds.custom_price || ds.services?.price;
-          const name = ds.services?.name || 'Consulta';
-          if (price) return `*${name}*: R$ ${Number(price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+          const svcName = ds.services?.name || 'Consulta';
+          if (price) return `*${svcName}*: R$ ${Number(price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
           return null;
         }).filter(Boolean);
         if (priceLines.length > 0) {
-          const doctorNameInfo = conversationState?.doctor_name || 'Médico';
-          infoAnswer = `💰 *Valores — ${doctorNameInfo}:*\n${priceLines.join('\n')}`;
+          const specStr = doctorSpecialty ? ` (${doctorSpecialty})` : '';
+          priceAnswer = `A consulta com *${doctorNameForInfo}*${specStr} custa:\n${priceLines.join('\n')}`;
         }
       }
     } catch (e) { console.warn('[INFO_INTERCEPTOR] doctor_services fetch error:', e.message); }
   }
 
-  // Determinar se a mensagem também contém intenção de agendar
-  const alsoWantsToSchedule = /\b(marcar|agendar|consulta|horário|vaga|agendar)\b/i.test(envelope.message_text) ||
-    interceptarIntencaoDireta(envelope.message_text) === 'schedule_new';
-
-  // Sem resposta em nenhuma fonte E há contexto de booking → resposta determinística
-  if (!infoAnswer && isInActiveBooking) {
-    const noKbMsg = bookingStateNow === BOOKING_STATES.BOOKED
-      ? `Para informações sobre valores e formas de pagamento, recomendo confirmar diretamente com a clínica. 📞`
-      : `Sobre sua dúvida: para informações sobre valores e formas de pagamento, recomendo confirmar diretamente com a clínica. 📞\n\nPosso continuar com seu agendamento?`;
+  // ── STEP 3: Se há preço → responder DIRETAMENTE, sem KB ─────────────────
+  if (priceAnswer) {
+    const finalPriceMsg = `${priceAnswer}\n\nSe for por convênio, posso verificar a cobertura também. Deseja agendar? 😊`;
     await saveConversationTurn({
       clinicId: envelope.clinic_id, fromNumber: envelope.from,
       correlationId: envelope.correlation_id, userText: envelope.message_text,
-      assistantText: noKbMsg, intentGroup: 'other', intent: 'info_no_source', slots: null,
+      assistantText: finalPriceMsg, intentGroup: 'other', intent: 'info_price_answered', slots: null,
     });
     clearTimeout(timeoutId);
     return res.json({
       correlation_id: envelope.correlation_id,
-      final_message: noKbMsg,
+      final_message: finalPriceMsg,
+      actions: [{
+        type: 'send_interactive_buttons',
+        payload: { buttons: [
+          { id: 'schedule_new', title: '📅 Agendar consulta' },
+          { id: 'ask_question', title: '❓ Outra dúvida' },
+        ]},
+      }],
+      debug: DEBUG ? { source: 'info_interceptor_price', doctor_id: doctorIdForInfo } : undefined,
+    });
+  }
+
+  // ── STEP 4: Sem médico identificado → KB genérica (convênios/pagamento) ─
+  let kbAnswer = '';
+  try {
+    const { data: kbInfo } = await supabase
+      .from('clinic_kb')
+      .select('title, content')
+      .eq('clinic_id', envelope.clinic_id)
+      .or('title.ilike.%onvênio%,title.ilike.%alor%,title.ilike.%pagamento%,title.ilike.%preço%,title.ilike.%plano%')
+      .limit(4);
+    if (kbInfo && kbInfo.length > 0) {
+      kbAnswer = kbInfo.map(k => `*${k.title}*: ${k.content}`).join('\n\n');
+    }
+  } catch (e) { console.warn('[INFO_INTERCEPTOR] KB fetch error:', e.message); }
+
+  const alsoWantsToSchedule = /\b(marcar|agendar|consulta|horário|vaga)\b/i.test(envelope.message_text) ||
+    interceptarIntencaoDireta(envelope.message_text) === 'schedule_new';
+
+  if (kbAnswer) {
+    let finalKbMsg = kbAnswer;
+    if (alsoWantsToSchedule)   finalKbMsg += '\n\n---\nGostaria de agendar uma consulta? 😊';
+    else if (isInActiveBooking) finalKbMsg += '\n\n---\nPosso continuar seu agendamento quando quiser 😊';
+
+    await saveConversationTurn({
+      clinicId: envelope.clinic_id, fromNumber: envelope.from,
+      correlationId: envelope.correlation_id, userText: envelope.message_text,
+      assistantText: finalKbMsg, intentGroup: 'other', intent: 'info_kb_answered', slots: null,
+    });
+    clearTimeout(timeoutId);
+    return res.json({
+      correlation_id: envelope.correlation_id,
+      final_message: finalKbMsg,
+      actions: alsoWantsToSchedule || isInActiveBooking ? [{
+        type: 'send_interactive_buttons',
+        payload: { buttons: [
+          { id: 'schedule_new', title: '📅 Agendar consulta' },
+          { id: 'ask_question', title: '❓ Outra dúvida' },
+        ]},
+      }] : [],
+      debug: DEBUG ? { source: 'info_interceptor_kb' } : undefined,
+    });
+  }
+
+  // ── STEP 5: Nenhuma fonte encontrou resposta ─────────────────────────────
+  if (isInActiveBooking) {
+    const noSrcMsg = bookingStateNow === BOOKING_STATES.BOOKED
+      ? `Para informações sobre valores e formas de pagamento, recomendo confirmar diretamente com a clínica. 📞`
+      : `Sobre sua dúvida: não encontrei essa informação no sistema. Recomendo confirmar diretamente com a clínica. 📞\n\nPosso continuar com seu agendamento?`;
+    await saveConversationTurn({
+      clinicId: envelope.clinic_id, fromNumber: envelope.from,
+      correlationId: envelope.correlation_id, userText: envelope.message_text,
+      assistantText: noSrcMsg, intentGroup: 'other', intent: 'info_no_source', slots: null,
+    });
+    clearTimeout(timeoutId);
+    return res.json({
+      correlation_id: envelope.correlation_id,
+      final_message: noSrcMsg,
       actions: bookingStateNow !== BOOKING_STATES.BOOKED ? [{
         type: 'send_interactive_buttons',
         payload: { buttons: [
@@ -2831,36 +2909,9 @@ if (messageHasInfoQuestion) {
       }] : [],
       debug: DEBUG ? { source: 'info_interceptor_no_source' } : undefined,
     });
-  } else if (infoAnswer) {
-    // Temos resposta na KB — retornar diretamente sem chamar LLM
-    let finalInfoMsg = infoAnswer;
-    if (alsoWantsToSchedule) {
-      finalInfoMsg += '\n\n---\nGostaria de agendar uma consulta? 😊';
-    } else if (isInActiveBooking) {
-      finalInfoMsg += '\n\n---\nPosso continuar seu agendamento quando quiser 😊';
-    }
-
-    await saveConversationTurn({
-      clinicId: envelope.clinic_id, fromNumber: envelope.from,
-      correlationId: envelope.correlation_id, userText: envelope.message_text,
-      assistantText: finalInfoMsg, intentGroup: 'other', intent: 'info_question_answered', slots: null,
-    });
-    clearTimeout(timeoutId);
-    return res.json({
-      correlation_id: envelope.correlation_id,
-      final_message: finalInfoMsg,
-      actions: alsoWantsToSchedule || isInActiveBooking ? [{
-        type: 'send_interactive_buttons',
-        payload: {
-          buttons: [
-            { id: 'schedule_new',      title: '📅 Agendar consulta' },
-            { id: 'ask_question',      title: '❓ Outra dúvida' },
-          ],
-        },
-      }] : [],
-      debug: DEBUG ? { source: 'info_interceptor_kb', has_kb: true } : undefined,
-    });
   }
+  // Se não há booking ativo e não encontrou resposta → deixa cair para o LLM
+  console.log(`[INFO_INTERCEPTOR] Sem resposta determinística, passando ao LLM.`);
 }
 
 // ======================================================
