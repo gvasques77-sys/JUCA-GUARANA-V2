@@ -153,7 +153,9 @@ export function createCrmApiRouter(supabase) {
   // ======================================================
   router.get('/patients', async (req, res) => {
     try {
-      const { stage, search, doctor_id, limit = '50', offset = '0' } = req.query;
+      // BUG-04 fix: aceitar tanto 'doctor' quanto 'doctor_id' (frontend envia 'doctor')
+      const { stage, search, doctor_id, doctor, limit = '50', offset = '0' } = req.query;
+      const activeDoctorFilter = doctor_id || doctor;
 
       let query = supabase
         .from('vw_patient_crm_full')
@@ -185,10 +187,17 @@ export function createCrmApiRouter(supabase) {
           apptByPatient[a.patient_id].push(a);
         });
 
+        const today = new Date().toISOString().split('T')[0];
         enriched = (patients || []).map(p => {
           const appts = apptByPatient[p.patient_id] || [];
           const lastAppt = appts[0] || null;
-          const nextAppt = appts.find(a => ['scheduled', 'confirmed'].includes(a.status) && a.appointment_date >= new Date().toISOString().split('T')[0]);
+
+          // BUG-03 fix: ordenar ascendente para pegar a próxima consulta real (mais próxima)
+          const upcomingAppts = appts
+            .filter(a => ['scheduled', 'confirmed'].includes(a.status) && a.appointment_date >= today)
+            .sort((a, b) => a.appointment_date.localeCompare(b.appointment_date));
+          const nextAppt = upcomingAppts[0] || null;
+
           const revenue = appts
             .filter(a => !['cancelled', 'no_show'].includes(a.status))
             .reduce((sum, a) => sum + Number(a.price || 0), 0);
@@ -196,8 +205,17 @@ export function createCrmApiRouter(supabase) {
 
           const row = {
             ...p,
+            // BUG-02 fix: garantir doctor_name/specialty sempre preenchidos
+            doctor_name: lastAppt?.doctors?.name || p.doctor_name || null,
+            doctor_specialty: lastAppt?.doctors?.specialty || p.doctor_specialty || null,
             last_doctor_name: lastAppt?.doctors?.name || null,
             last_doctor_specialty: lastAppt?.doctors?.specialty || null,
+            // BUG-03 fix: objeto next_appointment aninhado como o frontend espera
+            next_appointment: nextAppt ? {
+              date: nextAppt.appointment_date,
+              time: nextAppt.start_time,
+              doctor: nextAppt.doctors?.name || '',
+            } : null,
             next_appointment_date: nextAppt?.appointment_date || null,
             next_appointment_time: nextAppt?.start_time || null,
             patient_revenue: req.userRole === 'owner' ? revenue : undefined,
@@ -207,8 +225,9 @@ export function createCrmApiRouter(supabase) {
           return row;
         });
 
-        if (doctor_id && doctor_id !== 'all') {
-          enriched = enriched.filter(p => p.doctor_ids.includes(doctor_id));
+        // BUG-04 fix: usar activeDoctorFilter que aceita ambos os nomes de param
+        if (activeDoctorFilter && activeDoctorFilter !== 'all') {
+          enriched = enriched.filter(p => (p.doctor_ids || []).includes(activeDoctorFilter));
         }
       }
 
@@ -443,7 +462,8 @@ export function createCrmApiRouter(supabase) {
       const { data, error } = await query;
       if (error) {
         const { data: fb } = await supabase.from('vw_pending_tasks').select('*').eq('clinic_id', req.clinicId).limit(Number(limit));
-        return res.json(fb || []);
+        // Normalizar: garantir campo 'id' mesmo que a view use 'task_id'
+        return res.json((fb || []).map(t => ({ ...t, id: t.id || t.task_id })));
       }
 
       // Priorizar pendentes e falhas no topo
@@ -593,8 +613,9 @@ export function createCrmApiRouter(supabase) {
       const { taskId } = req.params;
       const { status } = req.body || {};
 
-      if (!['executed', 'cancelled'].includes(status)) {
-        return res.status(400).json({ error: 'Status inválido. Use: executed ou cancelled' });
+      // BUG-06 fix: remover 'executed' — não existe no enum do sistema; usar 'manual_completed'
+      if (!['manual_completed', 'cancelled'].includes(status)) {
+        return res.status(400).json({ error: 'Status inválido. Use: manual_completed ou cancelled' });
       }
 
       const { data: task, error: findErr } = await supabase
@@ -608,17 +629,18 @@ export function createCrmApiRouter(supabase) {
         return res.status(404).json({ error: 'Tarefa não encontrada' });
       }
 
-      if (['completed', 'manual_completed', 'cancelled', 'executed'].includes(task.status)) {
+      if (['completed', 'manual_completed', 'cancelled'].includes(task.status)) {
         return res.json({ success: true, message: 'Tarefa já finalizada', task });
       }
 
-      const update = { status, updated_at: new Date().toISOString() };
-      if (status === 'executed') update.executed_at = new Date().toISOString();
+      const update = { status, executed_at: new Date().toISOString() };
 
+      // BUG-07 fix: incluir clinic_id na query de escrita como defesa em profundidade
       const { data: updated, error: updateErr } = await supabase
         .from('crm_tasks')
         .update(update)
         .eq('id', taskId)
+        .eq('clinic_id', req.clinicId)
         .select('*')
         .single();
 
@@ -636,13 +658,51 @@ export function createCrmApiRouter(supabase) {
   });
 
   // ======================================================
-  // 6. AGENDA DO DIA + PRÓXIMOS
+  // 6. AGENDA DO DIA + PRÓXIMOS — BUG-05 fix: queries diretas com clinic_id
+  // As views vw_agenda_hoje / vw_proximos_agendamentos não tinham filtro de clínica.
+  // Substituído por queries diretas na tabela appointments com clinic_id obrigatório.
   // ======================================================
   router.get('/agenda/today', async (req, res) => {
     try {
-      const { data: today } = await supabase.from('vw_agenda_hoje').select('*');
-      const { data: upcoming } = await supabase.from('vw_proximos_agendamentos').select('*').limit(20);
-      return res.json({ today: today || [], upcoming: upcoming || [] });
+      const todayStr = new Date().toISOString().split('T')[0];
+      const nextTwoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+
+      const [{ data: todayRaw }, { data: upcomingRaw }] = await Promise.all([
+        supabase
+          .from('appointments')
+          .select('id, appointment_date, start_time, status, patients(name, phone), doctors(name, specialty), doctor_services(name)')
+          .eq('clinic_id', req.clinicId)
+          .eq('appointment_date', todayStr)
+          .order('start_time', { ascending: true })
+          .limit(60),
+        supabase
+          .from('appointments')
+          .select('id, appointment_date, start_time, status, patients(name, phone), doctors(name, specialty), doctor_services(name)')
+          .eq('clinic_id', req.clinicId)
+          .gt('appointment_date', todayStr)
+          .lte('appointment_date', nextTwoWeeks)
+          .in('status', ['scheduled', 'confirmed', 'waiting'])
+          .order('appointment_date', { ascending: true })
+          .order('start_time', { ascending: true })
+          .limit(40),
+      ]);
+
+      const normalize = (a) => ({
+        id: a.id,
+        appointment_date: a.appointment_date,
+        start_time: a.start_time,
+        status: a.status,
+        patient_name: a.patients?.name || '—',
+        patient_phone: a.patients?.phone || '',
+        doctor_name: a.doctors?.name || '—',
+        doctor_specialty: a.doctors?.specialty || '',
+        service_name: a.doctor_services?.name || '—',
+      });
+
+      return res.json({
+        today: (todayRaw || []).map(normalize),
+        upcoming: (upcomingRaw || []).map(normalize),
+      });
     } catch (err) {
       console.error('[CRM-API] /agenda:', err.message);
       return res.json({ today: [], upcoming: [] });
@@ -707,6 +767,92 @@ export function createCrmApiRouter(supabase) {
       return res.json({ success: true, message: 'Agendamento cancelado com sucesso' });
     } catch (err) {
       console.error('[CRM-API] /cancel:', err.message);
+      return res.status(500).json({ error: 'Erro interno' });
+    }
+  });
+
+  // ======================================================
+  // 7B. MARCAR COMO ATENDIDO
+  // ======================================================
+  router.post('/appointments/:appointmentId/attend', async (req, res) => {
+    try {
+      const { appointmentId } = req.params;
+      const { data: appt, error: findErr } = await supabase
+        .from('appointments')
+        .select('id, status, patient_id')
+        .eq('id', appointmentId)
+        .eq('clinic_id', req.clinicId)
+        .single();
+
+      if (findErr || !appt) return res.status(404).json({ error: 'Agendamento não encontrado' });
+      if (['cancelled', 'completed', 'no_show'].includes(appt.status)) {
+        return res.json({ success: true, message: 'Status já finalizado' });
+      }
+
+      const { error: updateErr } = await supabase
+        .from('appointments')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('id', appointmentId)
+        .eq('clinic_id', req.clinicId);
+
+      if (updateErr) return res.status(500).json({ error: 'Erro ao atualizar' });
+
+      try {
+        const { emitEvent } = await import('../services/crmService.js');
+        await emitEvent(supabase, req.clinicId, appt.patient_id, 'appointment_completed', {
+          appointmentId,
+          sourceSystem: 'dashboard',
+          idempotencyQualifier: 'completed:' + appointmentId,
+        });
+      } catch (e) { console.warn('[CRM-API] emitEvent attend:', e.message); }
+
+      console.log(`[CRM-API] Agendamento ${appointmentId} marcado como atendido por ${req.userName}`);
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('[CRM-API] /attend:', err.message);
+      return res.status(500).json({ error: 'Erro interno' });
+    }
+  });
+
+  // ======================================================
+  // 7C. MARCAR COMO NO-SHOW
+  // ======================================================
+  router.post('/appointments/:appointmentId/no-show', async (req, res) => {
+    try {
+      const { appointmentId } = req.params;
+      const { data: appt, error: findErr } = await supabase
+        .from('appointments')
+        .select('id, status, patient_id')
+        .eq('id', appointmentId)
+        .eq('clinic_id', req.clinicId)
+        .single();
+
+      if (findErr || !appt) return res.status(404).json({ error: 'Agendamento não encontrado' });
+      if (['cancelled', 'completed', 'no_show'].includes(appt.status)) {
+        return res.json({ success: true, message: 'Status já finalizado' });
+      }
+
+      const { error: updateErr } = await supabase
+        .from('appointments')
+        .update({ status: 'no_show', updated_at: new Date().toISOString() })
+        .eq('id', appointmentId)
+        .eq('clinic_id', req.clinicId);
+
+      if (updateErr) return res.status(500).json({ error: 'Erro ao atualizar' });
+
+      try {
+        const { emitEvent } = await import('../services/crmService.js');
+        await emitEvent(supabase, req.clinicId, appt.patient_id, 'no_show', {
+          appointmentId,
+          sourceSystem: 'dashboard',
+          idempotencyQualifier: 'no_show:' + appointmentId,
+        });
+      } catch (e) { console.warn('[CRM-API] emitEvent no-show:', e.message); }
+
+      console.log(`[CRM-API] Agendamento ${appointmentId} marcado como no-show por ${req.userName}`);
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('[CRM-API] /no-show:', err.message);
       return res.status(500).json({ error: 'Erro interno' });
     }
   });
@@ -1039,6 +1185,15 @@ export function createCrmApiRouter(supabase) {
     try {
       const { tag_id } = req.body || {};
       if (!tag_id) return res.status(400).json({ error: 'tag_id obrigatório' });
+
+      // BUG-08 fix: verificar que a tag pertence à mesma clínica antes de associar
+      const { data: tagOwner } = await supabase
+        .from('clinic_tags')
+        .select('id')
+        .eq('id', tag_id)
+        .eq('clinic_id', req.clinicId)
+        .single();
+      if (!tagOwner) return res.status(403).json({ error: 'Tag não pertence a esta clínica' });
 
       const { data, error } = await supabase
         .from('patient_tags')

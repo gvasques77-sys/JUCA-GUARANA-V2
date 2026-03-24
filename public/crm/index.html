@@ -97,9 +97,16 @@ async function refreshToken(){
 }
 
 // Fetch com auth
+// BUG-12 fix: se token ausente, redireciona para login em vez de retornar null silenciosamente
 function q(p,o){
   var token=getToken();
-  if(!token){return Promise.resolve(null)}
+  if(!token){
+    // Tentar refresh antes de redirecionar
+    return refreshToken().then(function(newToken){
+      if(!newToken){window.location.href='/crm/login.html';return null;}
+      return q(p,o); // retry com novo token
+    }).catch(function(){window.location.href='/crm/login.html';return null;});
+  }
   var opts=o||{};
   opts.headers=Object.assign({'Authorization':'Bearer '+token,'Content-Type':'application/json'},opts.headers||{});
   return fetch(API+p,opts).then(function(r){
@@ -157,8 +164,11 @@ function MC(p){var cs={blue:'#6E9FFF',emerald:'#34D399',amber:'#FBBF24',rose:'#F
   return h('div',{className:'card fi',style:{padding:'20px 24px'}},h('div',{className:'kpi-label'},p.l),h('div',{className:'kpi-value',style:{color:c}},p.v),p.s?h('div',{style:{fontSize:11,color:'var(--t3)',marginTop:6}},p.s):null)}
 function Bg(p){var bg=p.color?p.color+'20':'rgba(110,159,255,.12)';return h('span',{className:'badge',style:{background:bg,color:p.color||'#6E9FFF'}},SL[p.stage]||p.stage||'\u2014')}
 
+// BUG-01 fix: ref pattern — sempre chama a versão mais recente de fn, sem stale closure
 function useRefresh(fn,ms){
-  ue(function(){fn();var iv=setInterval(fn,ms||15000);return function(){clearInterval(iv)};},[]);
+  var ref=ur(fn);
+  ue(function(){ref.current=fn;});
+  ue(function(){ref.current();var iv=setInterval(function(){ref.current();},ms||15000);return function(){clearInterval(iv);};},[]);
 }
 
 /* === F9A: Chart.js utility + tema dark === */
@@ -185,7 +195,7 @@ function T1(p){
   function load(){Promise.all([q('/overview'),q('/funnel'),q('/analytics')]).then(function(r){sO(r[0]);sF(r[1]||[]);sA(r[2]);sL(false);})}
   useRefresh(load,15000);
 
-  /* F9A: Renderizar gr\u00e1ficos quando dados carregam */
+  /* F9A: BUG-10 fix — dependency array com an e fn para não recriar em re-renders desnecessários */
   ue(function(){
     if(ld||!an)return;
     var wt=an.weekly_timeline||[];
@@ -215,7 +225,7 @@ function T1(p){
         ]
       },{plugins:{legend:{position:'bottom'}},scales:{y:{position:'left',grid:{color:'rgba(255,255,255,.04)'},ticks:{color:'rgba(255,255,255,.35)',font:{family:'Inter',size:11}},border:{display:false},beginAtZero:true}}});
     }
-  });
+  },[an,fn,ld]);
 
   if(ld)return h(Ld);var o=ov||{};var a=an||{};var r=a.resumo||{};
   var mx=1;fn.forEach(function(s){if((s.patient_count||0)>mx)mx=s.patient_count});
@@ -327,22 +337,30 @@ function T1(p){
 function T2(p){
   var _p=us([]),pts=_p[0],sP=_p[1];var _t=us(0),tot=_t[0],sT=_t[1];
   var _s=us([]),stg=_s[0],sS=_s[1];var _d=us([]),docs=_d[0],sD=_d[1];
-  var _l=us(true),ld=_l[0],sL=_l[1];var _q=us(''),qv=_q[0],sQ=_q[1];
+  var _l=us(true),ld=_l[0],sL=_l[1];
+  // BUG-09 fix: separar input bruto (qvRaw) de qv debounced para evitar chamada dupla
+  var _qRaw=us(''),qvRaw=_qRaw[0],sQRaw=_qRaw[1];
+  var _q=us(''),qv=_q[0],sQ=_q[1];
   var _f=us('all'),sf=_f[0],sF=_f[1];var _df=us('all'),df=_df[0],sDF=_df[1];
   var isOwner=p.role==='owner';
+  // Debounce: aguarda 400ms de inatividade antes de disparar search
+  ue(function(){var t=setTimeout(function(){sQ(qvRaw);},400);return function(){clearTimeout(t);};},[qvRaw]);
   function load(){
     sL(true);var par='&stage='+sf+(qv?'&search='+encodeURIComponent(qv):'')+(df!=='all'?'&doctor='+df:'');
     Promise.all([q('/patients?limit=50'+par),q('/stages'),q('/doctors')]).then(function(r){
       var d=r[0]||{};sP(d.patients||[]);sT(d.total||0);sS(r[1]||[]);sD(r[2]||[]);sL(false);
     });
   }
-  ue(function(){load()},[qv,sf,df]);
-  useRefresh(load,15000);
+  // BUG-09 fix: remover ue([qv,sf,df]) que causava dupla carga no mount;
+  // useRefresh já chama load() imediatamente no mount E no filtro correto via ref.
+  // Para mudanças de filtro disparar imediatamente, usamos um ue separado só para filtros.
+  ue(function(){load();},[qv,sf,df]);
+  useRefresh(load,20000);
   return h('div',{className:'fi'},
     h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:12}},
       h('h2',{style:{fontSize:22,fontWeight:700}},'Pacientes ',h('span',{style:{fontSize:14,color:'var(--t3)',fontWeight:400}},'('+tot+')')),
       h('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
-        h('input',{type:'text',placeholder:'Buscar...',value:qv,onChange:function(e){sQ(e.target.value)},style:{width:160}}),
+        h('input',{type:'text',placeholder:'Buscar...',value:qvRaw,onChange:function(e){sQRaw(e.target.value)},style:{width:160}}),
         h('select',{value:sf,onChange:function(e){sF(e.target.value)}},h('option',{value:'all'},'Todos est\u00e1gios'),stg.map(function(s){return h('option',{key:s.slug,value:s.slug},s.name)})),
         h('select',{value:df,onChange:function(e){sDF(e.target.value)}},h('option',{value:'all'},'Todos m\u00e9dicos'),docs.map(function(d){return h('option',{key:d.id,value:d.id},d.name)}))
       )
@@ -740,47 +758,90 @@ function T4(p){
   );
 }
 
-/* ===== TELA 5: AGENDA + CANCELAMENTO ===== */
+/* ===== TELA 5: AGENDA + ATENDIDO / NO-SHOW / CANCELAMENTO ===== */
 function T5(){
-  var _a=us({today:[],upcoming:[]}),ag=_a[0],sA=_a[1];var _l=us(true),ld=_l[0],sL=_l[1];var _cx=us(null),cx=_cx[0],sCx=_cx[1];
-  function load(){q('/agenda/today').then(function(d){sA(d||{today:[],upcoming:[]});sL(false)})}
+  var _a=us({today:[],upcoming:[]}),ag=_a[0],sA=_a[1];
+  var _l=us(true),ld=_l[0],sL=_l[1];
+  var _cx=us(null),cx=_cx[0],sCx=_cx[1]; // id do appt em ação
+  var _conf=us(null),conf=_conf[0],sConf=_conf[1]; // {id, action} — confirmação inline
+
+  function load(){q('/agenda/today').then(function(d){sA(d||{today:[],upcoming:[]});sL(false);})}
   useRefresh(load,15000);
-  function cancelar(id){
-    if(!confirm('Confirma o cancelamento deste agendamento?'))return;
-    sCx(id);
-    q('/appointments/'+id+'/cancel',{method:'POST',body:JSON.stringify({reason:'Cancelado via dashboard'})}).then(function(r){
-      if(r&&r.success){alert('Agendamento cancelado!');load();}else{alert('Erro: '+(r&&r.error||'desconhecido'));}
+
+  // ação genérica: attend | no-show | cancel
+  function doAction(id,endpoint){
+    sCx(id);sConf(null);
+    q('/appointments/'+id+'/'+endpoint,{method:'POST',body:JSON.stringify({reason:'Via dashboard'})}).then(function(r){
       sCx(null);
+      if(r&&r.success){load();}else{alert('Erro: '+(r&&r.error||'desconhecido'));}
     });
   }
+
+  // Linha de agendamento reutilizável para hoje
+  function rowToday(a,i,arr){
+    var c=stC[a.status]||'#3B82F6';
+    var canAct=['scheduled','confirmed','waiting','in_progress'].indexOf(a.status)>=0;
+    var isConf=conf&&conf.id===a.id;
+    var isBusy=cx===a.id;
+    return h('div',{key:a.id||i,style:{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:i<arr.length-1?'1px solid var(--bdr)':'none',flexWrap:'wrap'}},
+      h('div',{className:'mono',style:{fontSize:16,fontWeight:700,color:'var(--blue)',width:52,flexShrink:0}},(a.start_time||'').substring(0,5)),
+      h('div',{style:{flex:1,minWidth:120}},
+        h('div',{style:{fontWeight:600,fontSize:14}},a.patient_name),
+        h('div',{style:{fontSize:12,color:'var(--t3)'}},a.doctor_name+(a.service_name&&a.service_name!=='\u2014'?' \u2022 '+a.service_name:''))
+      ),
+      h('span',{className:'badge',style:{background:c+'25',color:c,flexShrink:0}},stL[a.status]||a.status),
+      isConf
+        ? h('div',{style:{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}},
+            h('span',{style:{fontSize:12,color:'var(--t2)'}},conf.action==='cancel'?'Cancelar consulta?':conf.action==='attend'?'Marcar como atendido?':'Registrar no-show?'),
+            h('button',{className:'btnG',style:{fontSize:11},disabled:isBusy,onClick:function(){doAction(a.id,conf.action==='cancel'?'cancel':conf.action==='attend'?'attend':'no-show');}},isBusy?'...':'Confirmar'),
+            h('button',{onClick:function(){sConf(null);},style:{background:'none',border:'none',color:'var(--t3)',cursor:'pointer',fontSize:14,lineHeight:1}},'✕')
+          )
+        : canAct
+          ? h('div',{style:{display:'flex',gap:4,flexShrink:0}},
+              ['scheduled','confirmed','waiting','in_progress'].indexOf(a.status)>=0
+                ? h('button',{className:'btnG',style:{fontSize:10},disabled:!!cx,onClick:function(){sConf({id:a.id,action:'attend'});}},'\u2713 Atendido')
+                : null,
+              ['scheduled','confirmed','waiting','in_progress'].indexOf(a.status)>=0
+                ? h('button',{className:'btnAmber',style:{fontSize:10},disabled:!!cx,onClick:function(){sConf({id:a.id,action:'noshow'});}},'\u26A0 No-show')
+                : null,
+              ['scheduled','confirmed','waiting'].indexOf(a.status)>=0
+                ? h('button',{className:'btnR',style:{fontSize:10},disabled:!!cx,onClick:function(){sConf({id:a.id,action:'cancel'});}},'\u2715 Cancelar')
+                : null
+            )
+          : null
+    );
+  }
+
   var hj=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});
   return h('div',{className:'fi'},
     h('h2',{style:{fontSize:22,fontWeight:700,marginBottom:20}},'Agenda \u2014 '+hj),
     ld?h(Ld):h('div',null,
       h('div',{className:'card',style:{marginBottom:20}},
         h('h3',{style:{fontSize:15,fontWeight:600,marginBottom:12}},'Consultas Hoje ('+ag.today.length+')'),
-        ag.today.length===0?h(Em,{m:'Nenhuma consulta hoje',i:'\uD83D\uDCC5'}):
-        ag.today.map(function(a,i){
-          var c=stC[a.status]||'#3B82F6';var canCancel=['scheduled','confirmed','waiting'].indexOf(a.status)>=0;
-          return h('div',{key:a.id||i,style:{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:i<ag.today.length-1?'1px solid var(--bdr)':'none'}},
-            h('div',{className:'mono',style:{fontSize:16,fontWeight:700,color:'var(--blue)',width:55,flexShrink:0}},(a.start_time||'').substring(0,5)),
-            h('div',{style:{flex:1}},h('div',{style:{fontWeight:600,fontSize:14}},a.patient_name),h('div',{style:{fontSize:12,color:'var(--t3)'}},a.doctor_name+' \u2022 '+a.service_name)),
-            h('span',{className:'badge',style:{background:c+'25',color:c}},stL[a.status]||a.status),
-            canCancel?h('button',{className:'btnR',disabled:cx===a.id,onClick:function(){cancelar(a.id)}},cx===a.id?'...':'Cancelar'):null
-          );
-        })
+        ag.today.length===0
+          ? h(Em,{m:'Nenhuma consulta hoje',i:'\uD83D\uDCC5'})
+          : ag.today.map(function(a,i){return rowToday(a,i,ag.today);})
       ),
       h('div',{className:'card'},
-        h('h3',{style:{fontSize:15,fontWeight:600,marginBottom:12}},'Pr\u00f3ximos Agendamentos ('+ag.upcoming.length+')'),
+        h('h3',{style:{fontSize:15,fontWeight:600,marginBottom:12}},'Pr\u00f3ximos 14 dias ('+ag.upcoming.length+')'),
         ag.upcoming.length===0?h(Em,{m:'Nenhum agendamento futuro',i:'\uD83D\uDCCB'}):
-        ag.upcoming.slice(0,15).map(function(a,i){
+        ag.upcoming.slice(0,25).map(function(a,i){
           var canCancel=['scheduled','confirmed','waiting'].indexOf(a.status)>=0;
-          return h('div',{key:a.id||i,style:{display:'flex',alignItems:'center',gap:12,padding:'8px 0',borderBottom:'1px solid var(--bdr)'}},
-            h('div',{style:{width:75,fontSize:12,color:'var(--t3)',flexShrink:0}},fd(a.appointment_date)),
-            h('div',{className:'mono',style:{width:45,fontSize:13,fontWeight:600,color:'var(--cyan)',flexShrink:0}},(a.start_time||'').substring(0,5)),
+          var isConf=conf&&conf.id===a.id;var isBusy=cx===a.id;
+          return h('div',{key:a.id||i,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid var(--bdr)',flexWrap:'wrap'}},
+            h('div',{style:{width:72,fontSize:12,color:'var(--t3)',flexShrink:0}},fd(a.appointment_date)),
+            h('div',{className:'mono',style:{width:42,fontSize:13,fontWeight:600,color:'var(--cyan)',flexShrink:0}},(a.start_time||'').substring(0,5)),
             h('div',{style:{flex:1,fontSize:13}},a.patient_name),
-            h('div',{style:{fontSize:12,color:'var(--t3)',marginRight:8}},a.doctor_name),
-            canCancel?h('button',{className:'btnR',disabled:cx===a.id,onClick:function(){cancelar(a.id)}},cx===a.id?'...':'Cancelar'):null
+            h('div',{style:{fontSize:12,color:'var(--t3)',marginRight:4,flexShrink:0}},a.doctor_name),
+            isConf
+              ? h('div',{style:{display:'flex',gap:6,alignItems:'center'}},
+                  h('span',{style:{fontSize:12,color:'var(--t2)'}},'Cancelar?'),
+                  h('button',{className:'btnG',style:{fontSize:11},disabled:isBusy,onClick:function(){doAction(a.id,'cancel');}},isBusy?'...':'Confirmar'),
+                  h('button',{onClick:function(){sConf(null);},style:{background:'none',border:'none',color:'var(--t3)',cursor:'pointer',fontSize:14,lineHeight:1}},'✕')
+                )
+              : canCancel
+                ? h('button',{className:'btnR',style:{fontSize:10},disabled:!!cx,onClick:function(){sConf({id:a.id,action:'cancel'});}},'\u2715 Cancelar')
+                : null
           );
         })
       )
@@ -959,7 +1020,9 @@ function App(){
     )
   );
 }
-ReactDOM.render(h(App),document.getElementById('root'));
+// BUG-14 fix: usar createRoot (React 18) em vez do ReactDOM.render deprecated
+var _root=ReactDOM.createRoot(document.getElementById('root'));
+_root.render(h(App));
 </script>
 </body>
 </html>
