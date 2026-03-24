@@ -1415,6 +1415,29 @@ function buildDateListAction(dates, doctorName) {
   };
 }
 
+/**
+ * Gera action `send_interactive_list` para seleção de horário.
+ * Row id = "1"–"10" → compatível com o interceptor numérico (sugSlots[idx]).
+ */
+function buildTimeListAction(slots, doctorName, dateFormatted) {
+  const rows = (slots || []).slice(0, 10).map((slot, i) => {
+    const timeStr = typeof slot === 'string' ? slot : (slot?.time || '');
+    return {
+      id: String(i + 1),
+      title: timeStr,
+    };
+  });
+  return {
+    type: 'send_interactive_list',
+    payload: {
+      header: 'Horários disponíveis',
+      body: `*${(doctorName || 'Médico').substring(0, 55)}* — ${(dateFormatted || 'escolha o horário').substring(0, 60)}`,
+      button: 'Ver horários',
+      sections: [{ title: 'Selecione o horário', rows }],
+    },
+  };
+}
+
 // ======================================================
 // CONFIRMAÇÃO OBRIGATÓRIA ANTES DE AGENDAR
 // ======================================================
@@ -2687,7 +2710,12 @@ if (intentoDireto) {
     const sugDates = conversationState?.last_suggested_dates || [];
     const sugSlots = conversationState?.last_suggested_slots || [];
 
-    if (sugDates.length > 0 && idx < sugDates.length) {
+    // Prioridade: quando em AWAITING_SLOTS e há horários disponíveis, interpretar como
+    // seleção de HORÁRIO, não de data (mesmo que sugDates ainda esteja populado do turno anterior)
+    const isAwaitingSlots = conversationState?.booking_state === BOOKING_STATES.AWAITING_SLOTS;
+    const shouldPickSlot = isAwaitingSlots && sugSlots.length > 0 && idx < sugSlots.length;
+
+    if (!shouldPickSlot && sugDates.length > 0 && idx < sugDates.length) {
       // Usuário escolheu uma DATA da lista
       const chosen = sugDates[idx];
       const chosenDateISO = chosen.date_iso || chosen.date || null;
@@ -2704,10 +2732,9 @@ if (intentoDireto) {
             booking_state: BOOKING_STATES.AWAITING_SLOTS,
             last_suggested_slots: cachedSlots,
           });
-          const slotsStr = cachedSlots.join(' · ');
           const dateFormatted = formatDateBR(chosenDateISO);
           const doctorDisplay = conversationState.doctor_name || 'Médico selecionado';
-          const displayMsg = `🕐 *${doctorDisplay}*\n📅 ${dateFormatted}\n\nHorários disponíveis:\n${slotsStr}\n\nQual horário você prefere?`;
+          const displayMsg = `🕐 *${doctorDisplay}*\n📅 ${dateFormatted}\n\nHorários disponíveis:\n${cachedSlots.join(' · ')}\n\nQual horário você prefere?`;
           await saveConversationTurn({
             clinicId: envelope.clinic_id,
             fromNumber: envelope.from,
@@ -2722,7 +2749,7 @@ if (intentoDireto) {
           return res.json({
             correlation_id: envelope.correlation_id,
             final_message: displayMsg,
-            actions: [],
+            actions: [buildTimeListAction(cachedSlots, doctorDisplay, dateFormatted)],
             debug: DEBUG ? { source: 'numeric_intercept_cached_slots', date: chosenDateISO, slots_count: cachedSlots.length } : undefined,
           });
         }
@@ -2746,10 +2773,9 @@ if (intentoDireto) {
               booking_state: BOOKING_STATES.AWAITING_SLOTS,
               last_suggested_slots: inlineSlots.map(s => ({ date: chosenDateISO, time: s })),
             });
-            const slotsStr = inlineSlots.join(' · ');
             const dateFormatted = formatDateBR(chosenDateISO);
             const doctorDisplay = conversationState.doctor_name || 'Médico selecionado';
-            const displayMsg = `🕐 *${doctorDisplay}*\n📅 ${dateFormatted}\n\nHorários disponíveis:\n${slotsStr}\n\nQual horário você prefere?`;
+            const displayMsg = `🕐 *${doctorDisplay}*\n📅 ${dateFormatted}\n\nHorários disponíveis:\n${inlineSlots.join(' · ')}\n\nQual horário você prefere?`;
             await saveConversationTurn({
               clinicId: envelope.clinic_id,
               fromNumber: envelope.from,
@@ -2764,7 +2790,7 @@ if (intentoDireto) {
             return res.json({
               correlation_id: envelope.correlation_id,
               final_message: displayMsg,
-              actions: [],
+              actions: [buildTimeListAction(inlineSlots, doctorDisplay, dateFormatted)],
               debug: DEBUG ? { source: 'numeric_intercept_inline_verify', date: chosenDateISO, slots_count: inlineSlots.length } : undefined,
             });
           }
@@ -2835,7 +2861,7 @@ if (intentoDireto) {
         };
         step++;
       }
-    } else if (sugSlots.length > 0 && idx < sugSlots.length) {
+    } else if (shouldPickSlot || (sugSlots.length > 0 && idx < sugSlots.length)) {
       // Usuário escolheu um HORÁRIO da lista
       const chosenSlot = typeof sugSlots[idx] === 'string' ? sugSlots[idx] : sugSlots[idx]?.time;
       if (chosenSlot) {
@@ -3690,7 +3716,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             return res.json({
               correlation_id: envelope.correlation_id,
               final_message: displayMsg,
-              actions: [],
+              actions: [buildTimeListAction(filteredSlots.map(s => typeof s === 'string' ? s : s?.time), doctorDisplay, dateFormatted)],
               debug: DEBUG ? { booking_state: BOOKING_STATES.AWAITING_SLOTS, slots_count: filteredSlots.length } : undefined,
             });
           }
@@ -4269,10 +4295,23 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       console.error('[CRM] Erro ao iniciar CRM V2:', crmErr.message);
     }
 
+    // Se o LLM apresentou horários mas não gerou lista interativa, injetar aqui
+    const finalActions = decided.actions ?? [];
+    const hasTimeList = finalActions.some(a => a.type === 'send_interactive_list');
+    if (!hasTimeList && updatedState?.booking_state === BOOKING_STATES.AWAITING_SLOTS) {
+      const sugSlotsFinal = updatedState?.last_suggested_slots || [];
+      if (sugSlotsFinal.length > 0) {
+        const doctorDisplayFinal = updatedState?.doctor_name || 'Médico selecionado';
+        const dateFinalISO = updatedState?.last_selected_date || (sugSlotsFinal[0]?.date || '');
+        const dateFinalFormatted = dateFinalISO ? formatDateBR(dateFinalISO) : '';
+        finalActions.push(buildTimeListAction(sugSlotsFinal, doctorDisplayFinal, dateFinalFormatted));
+      }
+    }
+
     return res.json({
       correlation_id: envelope.correlation_id,
       final_message: decided.message,
-      actions: decided.actions ?? [],
+      actions: finalActions,
       debug: DEBUG
         ? {
             extracted,
