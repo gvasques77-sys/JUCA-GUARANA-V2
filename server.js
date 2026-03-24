@@ -114,6 +114,17 @@ const INTENCOES_DIRETAS = {
   'quero ver meus agendamentos': 'view_appointments',
   'minhas consultas':       'view_appointments',
   'meus horarios':          'view_appointments',
+  'meu agendamento':        'view_appointments',
+  'minha consulta':         'view_appointments',
+  'qual minha consulta':    'view_appointments',
+  'qual meu agendamento':   'view_appointments',
+  'qual meu horario':       'view_appointments',
+  'minha agenda':           'view_appointments',
+  'qual minha agenda':      'view_appointments',
+  'ver minha agenda':       'view_appointments',
+  'o que agendei':          'view_appointments',
+  'quando e minha consulta':'view_appointments',
+  'quando e meu horario':   'view_appointments',
   'esta semana':            'week_current',
   'essa semana':            'week_current',
   'semana atual':           'week_current',
@@ -862,7 +873,7 @@ async function normalizeSpecialtyWithFallback(input, supabaseClient, clinicId) {
  * Valida especialidade e médico contra dados reais da clínica.
  * Suporta os dois naming conventions do extract_intent.
  */
-async function mergeExtractedSlots(currentState, extractedSlots, doctors, services, supabaseClient, clinicId) {
+async function mergeExtractedSlots(currentState, extractedSlots, doctors, services, supabaseClient, clinicId, timezone) {
   const updates = { ...currentState };
 
   // Nome do paciente
@@ -905,6 +916,16 @@ async function mergeExtractedSlots(currentState, extractedSlots, doctors, servic
   // CORREÇÃO 1: Matching robusto com remoção de prefixo Dr/Dra e busca parcial
   const doctorInput = extractedSlots.doctor_name || extractedSlots.doctor_preference;
   if (doctorInput) {
+    // DOCTOR-GUARD: uma vez que doctor_id está definido e o estado passou da coleta inicial,
+    // NUNCA permitir que extração LLM sobrescreva o médico escolhido.
+    // Isso cobre COLLECTING_DATE (onde o bug ocorria) + todos os estados avançados.
+    const _currentBsDoctor = updates.booking_state || currentState.booking_state;
+    const _doctorLocked = currentState.doctor_id &&
+      _currentBsDoctor !== BOOKING_STATES.IDLE &&
+      _currentBsDoctor !== BOOKING_STATES.COLLECTING_SPECIALTY;
+    if (_doctorLocked) {
+      console.log(`[DOCTOR-GUARD] Médico travado (${currentState.doctor_name}, ${currentState.doctor_id}) em estado ${_currentBsDoctor} — ignorando extração LLM: "${doctorInput}"`);
+    } else {
     // Normalizar: lowercase + remover acentos + remover prefixo Dr/Dra
     const normalizedDoc = doctorInput
       .toLowerCase()
@@ -953,6 +974,7 @@ async function mergeExtractedSlots(currentState, extractedSlots, doctors, servic
     } else {
       console.warn(`[CORREÇÃO1] Médico NÃO encontrado: '${doctorInput}' (normalizado: '${normalizedDoc}'). Disponíveis:`, doctors.map(d => d.name));
     }
+    } // fim do else do DOCTOR-GUARD
   }
 
   // Data (extract_intent usa 'preferred_date_text')
@@ -965,7 +987,9 @@ async function mergeExtractedSlots(currentState, extractedSlots, doctors, servic
     const existingIsValid = isoPattern.test(existingDateISO || '');
     // Só proteger datas FUTURAS (ou hoje) — datas passadas devem ser sobrescritas
     const existingDateObj = existingIsValid ? new Date((existingDateISO || '') + 'T00:00:00') : null;
-    const todayStart = new Date(new Date().toISOString().split('T')[0] + 'T00:00:00');
+    const _tz = timezone || 'America/Cuiaba';
+    const _todayClinic = new Date().toLocaleDateString('en-CA', { timeZone: _tz });
+    const todayStart = new Date(_todayClinic + 'T00:00:00');
     const existingIsFuture = existingDateObj && !isNaN(existingDateObj.getTime()) && existingDateObj >= todayStart;
     const protectedStates = [BOOKING_STATES.AWAITING_SLOTS, BOOKING_STATES.COLLECTING_TIME, BOOKING_STATES.CONFIRMING, BOOKING_STATES.BOOKED];
     const currentBookingState = updates.booking_state || currentState.booking_state;
@@ -973,10 +997,14 @@ async function mergeExtractedSlots(currentState, extractedSlots, doctors, servic
       console.log(`[DATE-GUARD] preferred_date já definido (${existingDateISO}) em estado ${currentBookingState} — ignorando extração LLM: "${dateInput}"`);
     } else {
       // Tentar resolver para ISO (YYYY-MM-DD) antes de salvar
+      // Usar timezone da clínica para evitar data errada à noite (UTC vs América)
+      const _tzRef = timezone || 'America/Cuiaba';
+      const _clinicTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: _tzRef });
+      const _refDate = new Date(_clinicTodayStr + 'T12:00:00');
       const resolvedDate = resolveDateChoice(
         dateInput,
         currentState.last_suggested_dates || [],
-        new Date()
+        _refDate
       );
       if (resolvedDate) {
         updates.preferred_date = resolvedDate;
@@ -988,12 +1016,11 @@ async function mergeExtractedSlots(currentState, extractedSlots, doctors, servic
           updates.preferred_date_iso = dateInput;
           console.log(`[BUG2-FIX] Data ISO direta: "${dateInput}"`);
         } else {
-          // Manter texto original — LLM vai tentar interpretar depois
-          updates.preferred_date = dateInput;
-          if (extractedSlots.preferred_date_iso) {
-            updates.preferred_date_iso = extractedSlots.preferred_date_iso;
-          }
-          console.log(`[BUG2-FIX] Data não resolvida, mantendo texto: "${dateInput}"`);
+          // Data não-ISO e não resolvível — NÃO atualizar estado.
+          // Se salvarmos preferred_date="sexta" mas preferred_date_iso="2026-03-25" (valor antigo),
+          // o criar_agendamento usaria a data errada no fallback.
+          // O LLM receberá o texto via system prompt e tentará resolver no próximo turno.
+          console.log(`[DATE-GUARD] Data não-ISO não resolvida: "${dateInput}" — preservando preferred_date_iso anterior (${currentState.preferred_date_iso || 'null'})`);
         }
       }
     }
@@ -1115,6 +1142,37 @@ function formatISO(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * Normaliza array de datas do schedulingService para salvar em last_suggested_dates.
+ * Garante que date_iso está SEMPRE em formato YYYY-MM-DD (nunca DD/MM ou texto).
+ * Isso evita que o interceptor numérico recupere uma data em formato errado.
+ */
+function normalizeDatesForState(dates) {
+  const ISO_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+  return (dates || []).map(d => {
+    // date_iso deve ser ISO; se não for, tentar extrair de date
+    let dateIso = d.date_iso || d.date || null;
+    if (dateIso && !ISO_PATTERN.test(dateIso)) {
+      // Pode ser "31/03/2026" → converter para ISO
+      const parts = dateIso.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (parts) {
+        dateIso = `${parts[3]}-${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+      } else {
+        // Fallback: usar d.date_iso se tiver, senão null para evitar dado corrompido
+        dateIso = ISO_PATTERN.test(d.date_iso || '') ? d.date_iso : null;
+      }
+    }
+    return {
+      date: d.date,
+      date_iso: dateIso,
+      formatted_date: d.formatted_date,
+      day_of_week: d.day_of_week,
+      slots_count: d.slots_count || (d.slots || []).length,
+      slots: d.slots || [],
+    };
+  }).filter(d => d.date_iso); // remover entradas com date_iso inválido
 }
 
 function nextWeekday(referenceDate, targetDay) {
@@ -1647,6 +1705,7 @@ ${cs.preferred_time ? `✅ Horário: ${cs.preferred_time}` : '❌ Horário: PEND
 
 ESTÁGIO: ${cs.conversation_stage || 'greeting'}
 BOOKING_STATE: ${cs.booking_state || 'idle'}
+${cs.booking_state === BOOKING_STATES.BOOKED ? `🔒 AGENDAMENTO JÁ CONFIRMADO — NÃO tente agendar novamente. Se o paciente perguntar sobre a consulta, confirme os dados acima. Se quiser novo agendamento, mude booking_state para idle.` : ''}
 ${cs.booking_state === 'collecting_date' ? '⚠️ ATENÇÃO: A data anterior não tinha horários disponíveis. NÃO chame verificar_disponibilidade. Pergunte ao paciente qual nova data prefere, ou chame buscar_proximas_datas para mostrar datas disponíveis.' : ''}
 PRÓXIMO CAMPO A COLETAR: ${(cs.pending_fields || [])[0] || 'NENHUM — PRONTO PARA CONFIRMAR'}
 ${cs.last_question_asked ? `ÚLTIMA PERGUNTA FEITA (NÃO REPITA): "${cs.last_question_asked}"` : ''}
@@ -2185,7 +2244,9 @@ if (previousMessages.length === 0) {
     // CORREÇÃO Problema 1: histórico vazio (novo número ou deletado manualmente)
     // Resetar conversation_state para evitar que contexto antigo persista
     const currentState = conversationState;
-    const hasStaleState = currentState && (
+    // Não resetar estado BOOKED — o paciente pode perguntar sobre o agendamento que fez
+    const isBookedState = currentState?.booking_state === BOOKING_STATES.BOOKED;
+    const hasStaleState = !isBookedState && currentState && (
       currentState.doctor_id ||
       currentState.specialty ||
       currentState.preferred_date ||
@@ -2211,6 +2272,35 @@ if (previousMessages.length === 0) {
     // CORREÇÃO 4: Verificar se greeting já foi enviado recentemente (evita duplicação)
     // CORREÇÃO 2+4: Só retorna greeting se NÃO houver intent_override (botão clicado)
     const isFirstMessage = !envelope.intent_override;
+
+    // BOOKED-GUARD: se o paciente já agendou, nunca mostrar greeting genérico.
+    // O greeting redefinia booking_state→IDLE e apagava doctor_id/nome/data — bug crítico.
+    if (isFirstMessage && isBookedState) {
+      const csB = conversationState;
+      const bookedWelcomeMsg = `Olá! Seu agendamento está confirmado ✅\n\n👤 Paciente: ${csB.patient_name || 'Você'}\n👨‍⚕️ Médico: ${csB.doctor_name || '—'}\n📅 Data: ${csB.preferred_date_iso || csB.preferred_date || '—'}\n🕐 Horário: ${csB.preferred_time || '—'}\n\nComo posso te ajudar?`;
+      await saveConversationTurn({
+        clinicId: envelope.clinic_id, fromNumber: envelope.from,
+        correlationId: envelope.correlation_id, userText: envelope.message_text,
+        assistantText: bookedWelcomeMsg, intentGroup: 'scheduling', intent: 'booked_welcome', slots: null,
+      });
+      clearTimeout(timeoutId);
+      return res.json({
+        correlation_id: envelope.correlation_id,
+        final_message: bookedWelcomeMsg,
+        actions: [{
+          type: 'send_interactive_buttons',
+          payload: {
+            buttons: [
+              { id: 'view_appointments', title: '📋 Meus agendamentos' },
+              { id: 'schedule_new',      title: '📅 Novo agendamento' },
+              { id: 'ask_question',      title: '❓ Tirar uma dúvida' },
+            ],
+          },
+        }],
+        debug: DEBUG ? { source: 'booked_welcome_guard' } : undefined,
+      });
+    }
+
     if (isFirstMessage) {
       // CORREÇÃO 4: Verificar se já existe um greeting recente no conversation_state
       // Isso evita duplicação quando duas mensagens chegam em rápida sucessão
@@ -2665,13 +2755,15 @@ if (isEncerramento) {
 // ======================================================
 const messageHasInfoQuestion = detectInfoQuestion(envelope.message_text);
 const bookingStateNow = conversationState?.booking_state;
+// BOOKED é incluído como "contexto ativo" para perguntas de informação —
+// o usuário pode perguntar "qual o valor" logo após confirmar o agendamento
 const isInActiveBooking = bookingStateNow &&
-  ![BOOKING_STATES.IDLE, BOOKING_STATES.BOOKED].includes(bookingStateNow);
+  bookingStateNow !== BOOKING_STATES.IDLE;
 
 if (messageHasInfoQuestion) {
   console.log(`[INFO_INTERCEPTOR] Pergunta informativa detectada: "${envelope.message_text.substring(0, 60)}" | booking_state=${bookingStateNow}`);
 
-  // Buscar KB de convênios/preços/pagamento para responder diretamente
+  // FONTE 1: KB de convênios/preços/pagamento
   let infoAnswer = '';
   try {
     const { data: kbInfo } = await supabase
@@ -2686,19 +2778,59 @@ if (messageHasInfoQuestion) {
     }
   } catch (e) { console.warn('[INFO_INTERCEPTOR] KB fetch error:', e.message); }
 
+  // FONTE 2: doctor_services — buscar valor real do médico escolhido
+  // R$ 350 vem DAQUI, não da KB. Sem isso, o bot sempre responde genérico.
+  const doctorIdForInfo = conversationState?.doctor_id;
+  if (!infoAnswer && doctorIdForInfo) {
+    try {
+      const { data: dsRows } = await supabase
+        .from('doctor_services')
+        .select('custom_price, service_id, services(name, price)')
+        .eq('doctor_id', doctorIdForInfo)
+        .eq('clinic_id', envelope.clinic_id)
+        .limit(5);
+      if (dsRows && dsRows.length > 0) {
+        const priceLines = dsRows.map(ds => {
+          const price = ds.custom_price || ds.services?.price;
+          const name = ds.services?.name || 'Consulta';
+          if (price) return `*${name}*: R$ ${Number(price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+          return null;
+        }).filter(Boolean);
+        if (priceLines.length > 0) {
+          const doctorNameInfo = conversationState?.doctor_name || 'Médico';
+          infoAnswer = `💰 *Valores — ${doctorNameInfo}:*\n${priceLines.join('\n')}`;
+        }
+      }
+    } catch (e) { console.warn('[INFO_INTERCEPTOR] doctor_services fetch error:', e.message); }
+  }
+
   // Determinar se a mensagem também contém intenção de agendar
   const alsoWantsToSchedule = /\b(marcar|agendar|consulta|horário|vaga|agendar)\b/i.test(envelope.message_text) ||
     interceptarIntencaoDireta(envelope.message_text) === 'schedule_new';
 
-  // Se não temos KB, deixar o LLM do scheduling agent responder
-  // mas injetar instrução para responder a dúvida PRIMEIRO
+  // Sem resposta em nenhuma fonte E há contexto de booking → resposta determinística
   if (!infoAnswer && isInActiveBooking) {
-    // Injetar flag no estado para que o scheduling agent saiba
-    // que deve responder a pergunta antes de continuar o agendamento
-    await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
-      pending_info_question: envelope.message_text,
+    const noKbMsg = bookingStateNow === BOOKING_STATES.BOOKED
+      ? `Para informações sobre valores e formas de pagamento, recomendo confirmar diretamente com a clínica. 📞`
+      : `Sobre sua dúvida: para informações sobre valores e formas de pagamento, recomendo confirmar diretamente com a clínica. 📞\n\nPosso continuar com seu agendamento?`;
+    await saveConversationTurn({
+      clinicId: envelope.clinic_id, fromNumber: envelope.from,
+      correlationId: envelope.correlation_id, userText: envelope.message_text,
+      assistantText: noKbMsg, intentGroup: 'other', intent: 'info_no_source', slots: null,
     });
-    // Continua fluxo normal — o system prompt vai captar o flag
+    clearTimeout(timeoutId);
+    return res.json({
+      correlation_id: envelope.correlation_id,
+      final_message: noKbMsg,
+      actions: bookingStateNow !== BOOKING_STATES.BOOKED ? [{
+        type: 'send_interactive_buttons',
+        payload: { buttons: [
+          { id: 'continue_booking', title: '📅 Continuar agendamento' },
+          { id: 'ask_question',     title: '❓ Outra dúvida' },
+        ]},
+      }] : [],
+      debug: DEBUG ? { source: 'info_interceptor_no_source' } : undefined,
+    });
   } else if (infoAnswer) {
     // Temos resposta na KB — retornar diretamente sem chamar LLM
     let finalInfoMsg = infoAnswer;
@@ -2727,6 +2859,44 @@ if (messageHasInfoQuestion) {
         },
       }] : [],
       debug: DEBUG ? { source: 'info_interceptor_kb', has_kb: true } : undefined,
+    });
+  }
+}
+
+// ======================================================
+// BOOKED STATE INTERCEPTOR
+// Quando o paciente já agendou e pergunta sobre a consulta,
+// responder com os dados do estado sem chamar o LLM.
+// Isso evita que o bot "esqueça" o agendamento recém-feito.
+// ======================================================
+if (conversationState?.booking_state === BOOKING_STATES.BOOKED && conversationState?.doctor_name) {
+  const bookedQuery = envelope.message_text.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, '').trim();
+  const isAskingAboutAppointment = /\b(consulta|agenda|agendei|agendamento|horario|medico|quando|qual|data|marcado|confirmado|lembrar)\b/.test(bookedQuery);
+
+  if (isAskingAboutAppointment) {
+    const cs = conversationState;
+    const bookedMsg = `Seu agendamento está confirmado! ✅\n\n👤 Paciente: ${cs.patient_name || 'Você'}\n👨‍⚕️ Médico: ${cs.doctor_name}\n📅 Data: ${cs.preferred_date_iso || cs.preferred_date || '—'}\n🕐 Horário: ${cs.preferred_time || '—'}\n\nSe precisar de algo mais, é só chamar! 😊`;
+    await saveConversationTurn({
+      clinicId: envelope.clinic_id, fromNumber: envelope.from,
+      correlationId: envelope.correlation_id, userText: envelope.message_text,
+      assistantText: bookedMsg, intentGroup: 'scheduling', intent: 'view_booked_appointment', slots: null,
+    });
+    clearTimeout(timeoutId);
+    return res.json({
+      correlation_id: envelope.correlation_id,
+      final_message: bookedMsg,
+      actions: [{
+        type: 'send_interactive_buttons',
+        payload: {
+          buttons: [
+            { id: 'schedule_new', title: '📅 Novo agendamento' },
+            { id: 'ask_question', title: '❓ Outra dúvida' },
+          ],
+        },
+      }],
+      debug: DEBUG ? { source: 'booked_interceptor' } : undefined,
     });
   }
 }
@@ -3046,8 +3216,8 @@ if (intentoDireto) {
           );
           if (inlineFallback?.success && inlineFallback?.dates?.length > 0) {
             await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
-              last_suggested_dates: inlineFallback.dates,
-              last_suggested_slots: inlineFallback.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
+              last_suggested_dates: normalizeDatesForState(inlineFallback.dates),
+              last_suggested_slots: normalizeDatesForState(inlineFallback.dates).flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso, time: s }))),
               booking_state: BOOKING_STATES.COLLECTING_DATE,
               preferred_date: null,
               preferred_date_iso: null,
@@ -3201,7 +3371,8 @@ const updatedState = await mergeExtractedSlots(
   doctors,
   services,
   supabase,            // cliente Supabase disponível no escopo da rota
-  envelope.clinic_id
+  envelope.clinic_id,
+  clinicRules?.timezone || 'America/Cuiaba'
 );
 
 // Salvar estado atualizado (sem sobrescrever last_question_asked ainda)
@@ -3370,18 +3541,35 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           trigger: 'button_confirm_yes',
         }, envelope.clinic_id, envelope.from);
         // FIX v5.1: Chamar criar_agendamento DETERMINISTICAMENTE (sem depender do LLM)
+        // VALIDAÇÃO PRÉ-CONFIRMAÇÃO: garantir que nenhum campo crítico está corrompido
+        const _ISO_RE_CONFIRM = /^\d{4}-\d{2}-\d{2}$/;
+        const _dateToBook = updatedState.preferred_date_iso || updatedState.preferred_date;
+        const _dateValid = _dateToBook && _ISO_RE_CONFIRM.test(_dateToBook);
+        const _confirmPayload = {
+          doctor_id: updatedState.doctor_id,
+          doctor_name: updatedState.doctor_name,
+          patient_name: updatedState.patient_name,
+          patient_phone: envelope.from,
+          data: _dateToBook,
+          horario: updatedState.preferred_time,
+          service_id: updatedState.service_id || null,
+        };
+        console.log('[CONFIRM] 🔍 PAYLOAD VALIDAÇÃO:', JSON.stringify(_confirmPayload));
+        if (!updatedState.doctor_id || !_dateValid || !updatedState.preferred_time) {
+          console.error('[CONFIRM] ❌ Payload inválido:', { doctor_id: updatedState.doctor_id, data: _dateToBook, horario: updatedState.preferred_time });
+          const invalidMsg = 'Não foi possível confirmar: alguns dados do agendamento estão incompletos. Vamos recomeçar? Por favor, informe novamente a data e horário desejados.';
+          await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+            booking_state: BOOKING_STATES.COLLECTING_DATE,
+            preferred_date: null, preferred_date_iso: null, preferred_time: null,
+          });
+          await saveConversationTurn({ clinicId: envelope.clinic_id, fromNumber: envelope.from, correlationId: envelope.correlation_id, userText: envelope.message_text, assistantText: invalidMsg, intentGroup: 'scheduling', intent: 'confirm_invalid_payload', slots: null });
+          clearTimeout(timeoutId);
+          return res.json({ correlation_id: envelope.correlation_id, final_message: invalidMsg, actions: [] });
+        }
         try {
           const agendResult = await executeSchedulingTool(
             'criar_agendamento',
-            {
-              doctor_id: updatedState.doctor_id,
-              patient_name: updatedState.patient_name,
-              patient_phone: envelope.from,
-              data: updatedState.preferred_date_iso || updatedState.preferred_date,
-              horario: updatedState.preferred_time,
-              service_id: updatedState.service_id || null,
-              observacoes: null,
-            },
+            _confirmPayload,
             { clinicId: envelope.clinic_id, userPhone: envelope.from }
           );
           console.log('[CONFIRM] criar_agendamento result:', JSON.stringify(agendResult));
@@ -3467,6 +3655,22 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           debug: DEBUG ? { state: newState } : undefined,
         });
       } else if (/^sim|^s$|confirmar|^ok$|^yes/.test(userSaidConfirmation)) {
+        // PENDENTE-GUARD: responder dúvida pendente ANTES de confirmar agendamento
+        if (updatedState.pending_info_question) {
+          const pendingQ = updatedState.pending_info_question;
+          await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+            pending_info_question: null,
+          });
+          const pendingMsg = `Antes de confirmar, quero esclarecer sua dúvida: sobre "${pendingQ}" — para valores e condições de pagamento, recomendo confirmar com a clínica. 📞\n\nSe quiser prosseguir com o agendamento mesmo assim, basta responder *sim* novamente. 😊`;
+          await saveConversationTurn({
+            clinicId: envelope.clinic_id, fromNumber: envelope.from,
+            correlationId: envelope.correlation_id, userText: envelope.message_text,
+            assistantText: pendingMsg, intentGroup: 'scheduling', intent: 'pending_question_before_confirm', slots: null,
+          });
+          clearTimeout(timeoutId);
+          return res.json({ correlation_id: envelope.correlation_id, final_message: pendingMsg, actions: [] });
+        }
+
         // Usuário confirmou → avançar para BOOKED e criar agendamento
         const newState = await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
           booking_state: BOOKING_STATES.BOOKED,
@@ -3478,18 +3682,35 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           trigger: 'user_confirmed',
         }, envelope.clinic_id, envelope.from);
         // FIX v5.1: Chamar criar_agendamento DETERMINISTICAMENTE (sem depender do LLM)
+        // VALIDAÇÃO PRÉ-CONFIRMAÇÃO (texto "sim")
+        const _ISO_RE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
+        const _dateToBookText = updatedState.preferred_date_iso || updatedState.preferred_date;
+        const _dateValidText = _dateToBookText && _ISO_RE_TEXT.test(_dateToBookText);
+        const _confirmPayloadText = {
+          doctor_id: updatedState.doctor_id,
+          doctor_name: updatedState.doctor_name,
+          patient_name: updatedState.patient_name,
+          patient_phone: envelope.from,
+          data: _dateToBookText,
+          horario: updatedState.preferred_time,
+          service_id: updatedState.service_id || null,
+        };
+        console.log('[CONFIRM-TEXT] 🔍 PAYLOAD VALIDAÇÃO:', JSON.stringify(_confirmPayloadText));
+        if (!updatedState.doctor_id || !_dateValidText || !updatedState.preferred_time) {
+          console.error('[CONFIRM-TEXT] ❌ Payload inválido:', { doctor_id: updatedState.doctor_id, data: _dateToBookText, horario: updatedState.preferred_time });
+          const invalidMsg2 = 'Não foi possível confirmar: alguns dados estão incompletos. Vamos recomeçar? Informe novamente a data e horário desejados.';
+          await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+            booking_state: BOOKING_STATES.COLLECTING_DATE,
+            preferred_date: null, preferred_date_iso: null, preferred_time: null,
+          });
+          await saveConversationTurn({ clinicId: envelope.clinic_id, fromNumber: envelope.from, correlationId: envelope.correlation_id, userText: envelope.message_text, assistantText: invalidMsg2, intentGroup: 'scheduling', intent: 'confirm_invalid_payload', slots: null });
+          clearTimeout(timeoutId);
+          return res.json({ correlation_id: envelope.correlation_id, final_message: invalidMsg2, actions: [] });
+        }
         try {
           const agendResult = await executeSchedulingTool(
             'criar_agendamento',
-            {
-              doctor_id: updatedState.doctor_id,
-              patient_name: updatedState.patient_name,
-              patient_phone: envelope.from,
-              data: updatedState.preferred_date_iso || updatedState.preferred_date,
-              horario: updatedState.preferred_time,
-              service_id: updatedState.service_id || null,
-              observacoes: null,
-            },
+            _confirmPayloadText,
             { clinicId: envelope.clinic_id, userPhone: envelope.from }
           );
           console.log('[CONFIRM-TEXT] criar_agendamento result:', JSON.stringify(agendResult));
@@ -3639,19 +3860,16 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         };
         // Pular para o final — não entrar em CONFIRMING com data inválida
       } else {
-      // Todos os campos preenchidos → entrar em CONFIRMING
+      // Todos os campos preenchidos → entrar em CONFIRMING (uma única chamada atômica)
       await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
         booking_state: BOOKING_STATES.CONFIRMING,
+        conversation_stage: 'awaiting_confirmation',
       });
       logDecision('state_transition', {
         from: updatedState.booking_state,
         to: BOOKING_STATES.CONFIRMING,
         trigger: 'all_fields_ready',
       }, envelope.clinic_id, envelope.from);
-      // CORREÇÃO 5: Atualizar conversation_stage para 'awaiting_confirmation'
-      await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
-        conversation_stage: 'awaiting_confirmation',
-      });
       const confirmMsg = await buildConfirmationMessage(updatedState, updatedState.doctor_name, clinicRules?.name, envelope.clinic_id);
       // CORREÇÃO 2: Salvar histórico antes de retornar
       await saveConversationTurn({
@@ -3813,8 +4031,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             // FIX loop: limpar preferred_date para que o guard rail não re-dispare com data antiga
             // FIX: Também salvar doctor_id para que o interceptor numérico funcione corretamente
             await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
-              last_suggested_dates: fallbackResult.dates,
-              last_suggested_slots: fallbackResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
+              last_suggested_dates: normalizeDatesForState(fallbackResult.dates),
+              last_suggested_slots: normalizeDatesForState(fallbackResult.dates).flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso, time: s }))),
               booking_state: BOOKING_STATES.COLLECTING_DATE,
               stuck_counter_slots: 0,
               preferred_date: null,
@@ -3862,8 +4080,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           // FIX v5.3: Salvar datas e slots no state para uso pelos botões "Esta semana / Próxima semana"
           // FIX: Também salvar doctor_id/doctor_name para que o interceptor numérico funcione corretamente
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
-            last_suggested_dates: toolResult.dates,
-            last_suggested_slots: toolResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
+            last_suggested_dates: normalizeDatesForState(toolResult.dates),
+            last_suggested_slots: normalizeDatesForState(toolResult.dates).flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso, time: s }))),
             booking_state: BOOKING_STATES.COLLECTING_DATE,
             stuck_counter_slots: 0,
             preferred_date: null,
@@ -4025,8 +4243,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         );
         if (availResult?.success && availResult?.dates?.length > 0) {
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
-            last_suggested_dates: availResult.dates,
-            last_suggested_slots: availResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
+            last_suggested_dates: normalizeDatesForState(availResult.dates),
+            last_suggested_slots: normalizeDatesForState(availResult.dates).flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso, time: s }))),
             booking_state: BOOKING_STATES.COLLECTING_DATE,
             preferred_date: null,
             preferred_date_iso: null,
@@ -4273,8 +4491,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               if (fallbackRes?.dates?.length > 0) {
                 // CORREÇÃO 3+5: Salvar last_suggested_dates e last_suggested_slots
                 await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
-                  last_suggested_dates: fallbackRes.dates,
-                  last_suggested_slots: fallbackRes.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date, time: s }))),
+                  last_suggested_dates: normalizeDatesForState(fallbackRes.dates),
+                  last_suggested_slots: normalizeDatesForState(fallbackRes.dates).flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso, time: s }))),
                   booking_state: BOOKING_STATES.COLLECTING_DATE,
                   stuck_counter_slots: 0,
                   preferred_date: null,

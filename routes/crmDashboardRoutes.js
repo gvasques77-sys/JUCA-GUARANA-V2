@@ -34,6 +34,11 @@
 import { Router } from 'express';
 import { authMiddleware, requireOwner } from '../middleware/authMiddleware.js';
 
+// Helper: retorna "hoje" no timezone correto (evita UTC ≠ horário local)
+function todayInTz(tz) {
+  return new Date().toLocaleDateString('en-CA', { timeZone: tz || 'America/Cuiaba' });
+}
+
 export function createCrmApiRouter(supabase) {
   const router = Router();
 
@@ -187,7 +192,7 @@ export function createCrmApiRouter(supabase) {
           apptByPatient[a.patient_id].push(a);
         });
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = todayInTz();
         enriched = (patients || []).map(p => {
           const appts = apptByPatient[p.patient_id] || [];
           const lastAppt = appts[0] || null;
@@ -664,8 +669,15 @@ export function createCrmApiRouter(supabase) {
   // ======================================================
   router.get('/agenda/today', async (req, res) => {
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const nextTwoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+      // Usar timezone da clínica para calcular "hoje" corretamente (evita data UTC ≠ data local)
+      const { data: clinicCfg } = await supabase
+        .from('clinic_settings')
+        .select('timezone')
+        .eq('clinic_id', req.clinicId)
+        .maybeSingle();
+      const tz = clinicCfg?.timezone || 'America/Cuiaba';
+      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+      const nextTwoWeeks = new Date(Date.now() + 14 * 86400000).toLocaleDateString('en-CA', { timeZone: tz });
 
       const [{ data: todayRaw }, { data: upcomingRaw }] = await Promise.all([
         supabase
@@ -950,7 +962,7 @@ export function createCrmApiRouter(supabase) {
           .select('patient_id')
           .eq('clinic_id', req.clinicId)
           .in('status', ['scheduled', 'confirmed'])
-          .gte('appointment_date', new Date().toISOString().split('T')[0]);
+          .gte('appointment_date', todayInTz());
 
         var futureSet = {};
         (futureAppts || []).forEach(function(a) { futureSet[a.patient_id] = true; });

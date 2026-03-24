@@ -132,7 +132,7 @@ function q(p,o){
   }).catch(function(){return null});
 }
 
-function fd(d){if(!d)return'\u2014';try{return new Date(d).toLocaleDateString('pt-BR')}catch(e){return d}}
+function fd(d){if(!d)return'\u2014';try{if(/^\d{4}-\d{2}-\d{2}$/.test(d)){var p=d.split('-');return p[2]+'/'+p[1]+'/'+p[0];}return new Date(d).toLocaleDateString('pt-BR')}catch(e){return d}}
 function fdt(d){if(!d)return'\u2014';try{return new Date(d).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return d}}
 function ago(d){if(!d)return'';var m=Math.floor((Date.now()-new Date(d).getTime())/60000);if(m<60)return m+'min';var hr=Math.floor(m/60);if(hr<24)return hr+'h';return Math.floor(hr/24)+'d'}
 function cur(v){return'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}
