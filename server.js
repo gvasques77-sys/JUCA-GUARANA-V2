@@ -37,6 +37,25 @@ const STUCK_LIMIT = 3
 // Intercepta respostas de 1-2 palavras ANTES do LLM
 // ======================================================
 const INTENCOES_DIRETAS = {
+  'continuar':        'continue_booking',
+  'continuar agendamento': 'continue_booking',
+  'quero continuar':  'continue_booking',
+  // Saudações por horário (interceptar antes do LLM — resposta simples)
+  'oi':               'greeting',
+  'ola':              'greeting',
+  'oi tudo bem':      'greeting',
+  'tudo bem':         'greeting',
+  'bom dia':          'greeting',
+  'boa tarde':        'greeting',
+  'boa noite':        'greeting',
+  'oi boa noite':     'greeting',
+  'oi boa tarde':     'greeting',
+  'oi bom dia':       'greeting',
+  'ola bom dia':      'greeting',
+  'ola boa tarde':    'greeting',
+  'ola boa noite':    'greeting',
+  'hey':              'greeting',
+  'hello':            'greeting',
   'marcar':           'schedule_new',
   'agendar':          'schedule_new',
   'consulta':         'schedule_new',
@@ -1631,6 +1650,7 @@ BOOKING_STATE: ${cs.booking_state || 'idle'}
 ${cs.booking_state === 'collecting_date' ? '⚠️ ATENÇÃO: A data anterior não tinha horários disponíveis. NÃO chame verificar_disponibilidade. Pergunte ao paciente qual nova data prefere, ou chame buscar_proximas_datas para mostrar datas disponíveis.' : ''}
 PRÓXIMO CAMPO A COLETAR: ${(cs.pending_fields || [])[0] || 'NENHUM — PRONTO PARA CONFIRMAR'}
 ${cs.last_question_asked ? `ÚLTIMA PERGUNTA FEITA (NÃO REPITA): "${cs.last_question_asked}"` : ''}
+${cs.pending_info_question ? `⚠️ PERGUNTA DE INFORMAÇÃO PENDENTE (RESPONDA PRIMEIRO): "${cs.pending_info_question}"\n→ O paciente perguntou sobre preço/convênio/pagamento. RESPONDA ISSO ANTES de retomar o agendamento.` : ''}
 ${(cs.last_suggested_dates || []).length > 0
   ? `DATAS JÁ APRESENTADAS AO PACIENTE: ${cs.last_suggested_dates.map((d, i) => `${i + 1}) ${d.day_of_week}, ${d.formatted_date}`).join(' | ')}`
   : ''}
@@ -1697,11 +1717,17 @@ Exemplos: "estou com dor nas costas", "tenho manchas na pele", "meu coração ac
    - consulta geral, check-up, exame → Clínico Geral
 → Exemplo de resposta: "Entendi, para dor nas costas o ideal é uma consulta com ortopedia. Gostaria de agendar? 😊"
 
-### 3. DÚVIDAS SOBRE A CLÍNICA
+### 3. DÚVIDAS SOBRE A CLÍNICA (preço, convênio, pagamento, endereço)
 Exemplos: "qual o endereço?", "aceita convênio?", "qual o preço?", "quais médicos têm?"
-→ Responda com as informações disponíveis acima.
-→ Se não souber, diga: "Para essa informação, recomendo ligar diretamente para a clínica."
-→ Se já estava num agendamento, retome depois de responder.
+→ Responda COM AS INFORMAÇÕES DA KB acima. NUNCA diga que não sabe se a KB tem a resposta.
+→ Se a KB não tem: diga "Para essa informação específica, recomendo ligar diretamente para a clínica."
+→ Se já estava num agendamento: RESPONDA A DÚVIDA COMPLETAMENTE PRIMEIRO. Só depois retome o agendamento.
+
+### 3B. MENSAGEM MISTA (dúvida + pedido de agendamento NA MESMA MENSAGEM)
+Exemplos: "quanto custa e vocês aceitam unimed? quero marcar consulta"
+→ OBRIGATÓRIO: Responda a dúvida de informação PRIMEIRO
+→ Só depois pergunte sobre o agendamento
+→ NUNCA pule a resposta da dúvida para ir direto ao agendamento
 
 ### 4. QUER AGENDAR (explícito ou implícito)
 Exemplos: "quero marcar", "preciso de uma consulta", "tem horário?"
@@ -2199,7 +2225,10 @@ if (previousMessages.length === 0) {
           actions: [{ type: 'dedup_blocked', payload: { reason: 'greeting_already_sent' } }],
         });
       }
-      const greetingMessage = 'Olá! Sou a Lara, secretária virtual da clínica. Como posso te ajudar?';
+      // Saudação sensível ao horário do dia
+      const greetingHour = Number(new Date().toLocaleString('pt-BR', { hour: 'numeric', hour12: false, timeZone: clinicRules?.timezone || 'America/Cuiaba' }));
+      const greetingSaudacao = greetingHour < 12 ? 'Bom dia' : greetingHour < 18 ? 'Boa tarde' : 'Boa noite';
+      const greetingMessage = `${greetingSaudacao}! Sou a Lara, secretária virtual da clínica. Como posso te ajudar? 😊`;
       // CORREÇÃO 2: Salvar histórico antes de retornar (evita loop de greeting)
       await saveConversationTurn({
         clinicId: envelope.clinic_id,
@@ -2251,6 +2280,84 @@ if (previousMessages.length === 0) {
 
 if (DEBUG) {
   log.debug({ count: previousMessages.length }, 'previous_messages_loaded');
+}
+
+// ======================================================
+// CORREÇÃO PROBLEMA-1: Saudação de retorno para sessões inativas
+// Se o usuário tem histórico mas ficou inativo por >= SESSION_TIMEOUT_HOURS,
+// enviar saudação contextual em vez de entrar no estado antigo sem avisar.
+// ======================================================
+if (previousMessages.length > 0 && !envelope.intent_override) {
+  const SESSION_TIMEOUT_HOURS = Number(process.env.SESSION_TIMEOUT_HOURS || 4);
+  const lastActivity = conversationState?.last_activity_at;
+  const hoursSinceLast = lastActivity
+    ? (Date.now() - new Date(lastActivity).getTime()) / 3600000
+    : Infinity;
+
+  if (hoursSinceLast >= SESSION_TIMEOUT_HOURS) {
+    const bookingState = conversationState?.booking_state;
+    const hadActiveBooking = bookingState &&
+      ![BOOKING_STATES.IDLE, BOOKING_STATES.BOOKED].includes(bookingState) &&
+      conversationState?.doctor_name;
+
+    console.log(`[RETORNO] Usuário retornou após ${hoursSinceLast.toFixed(1)}h. booking_state=${bookingState}. hadActiveBooking=${hadActiveBooking}`);
+
+    let returnGreeting;
+    let returnActions;
+
+    if (hadActiveBooking) {
+      // Estava no meio de um agendamento — perguntar se quer continuar
+      const doctorName = conversationState.doctor_name || 'o médico';
+      returnGreeting = `Olá! Que bom te ver de volta 😊 Você havia iniciado um agendamento com ${doctorName}. Gostaria de continuar ou prefere começar do zero?`;
+      returnActions = [{
+        type: 'send_interactive_buttons',
+        payload: {
+          buttons: [
+            { id: 'continue_booking', title: '▶️ Continuar agendamento' },
+            { id: 'schedule_new',     title: '🔄 Começar do zero' },
+          ],
+        },
+      }];
+    } else {
+      // Nenhum agendamento ativo — saudação limpa
+      const hourOfDay = new Date().toLocaleString('pt-BR', { hour: 'numeric', hour12: false, timeZone: clinicRules?.timezone || 'America/Cuiaba' });
+      const hora = Number(hourOfDay);
+      const saudacao = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
+      returnGreeting = `${saudacao}! Sou a Lara 😊 Como posso te ajudar hoje?`;
+      returnActions = [{
+        type: 'send_interactive_buttons',
+        payload: {
+          buttons: [
+            { id: 'schedule_new',      title: '📅 Agendar consulta' },
+            { id: 'view_appointments', title: '📋 Meus agendamentos' },
+            { id: 'ask_question',      title: '❓ Tirar uma dúvida' },
+          ],
+        },
+      }];
+      // Limpar estado stale — nova sessão limpa
+      await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+        booking_state: BOOKING_STATES.IDLE,
+        preferred_date: null, preferred_date_iso: null, preferred_time: null,
+        last_suggested_dates: [], last_suggested_slots: [],
+        stuck_counter_slots: 0, stuck_counter_off_topic: 0,
+        doctor_id: null, doctor_name: null, specialty: null,
+        patient_name: null, pending_fields: [], last_question_asked: null,
+      });
+    }
+
+    await saveConversationTurn({
+      clinicId: envelope.clinic_id, fromNumber: envelope.from,
+      correlationId: envelope.correlation_id, userText: envelope.message_text,
+      assistantText: returnGreeting, intentGroup: 'other', intent: 'return_greeting', slots: null,
+    });
+    clearTimeout(timeoutId);
+    return res.json({
+      correlation_id: envelope.correlation_id,
+      final_message: returnGreeting,
+      actions: returnActions,
+      debug: DEBUG ? { source: 'return_greeting', hours_since_last: hoursSinceLast.toFixed(1), had_active_booking: hadActiveBooking } : undefined,
+    });
+  }
 }
 
 // Construir array de mensagens incluindo histórico
@@ -2424,6 +2531,29 @@ if (envelope.intent_override) {
     });
   }
 
+  // Handler para botão "Continuar agendamento" (retorno após inatividade)
+  if (envelope.intent_override === 'continue_booking') {
+    const bState = conversationState?.booking_state;
+    const drName = conversationState?.doctor_name;
+    const spec   = conversationState?.specialty;
+    const pDate  = conversationState?.preferred_date_iso || conversationState?.preferred_date;
+    let continueMsg;
+    if (drName && pDate) {
+      continueMsg = `Ótimo! Continuando o agendamento com *${drName}*.\n📅 Data que você havia escolhido: ${formatDateBR(pDate)}.\n\nQuer confirmar esta data ou escolher outra?`;
+    } else if (drName) {
+      continueMsg = `Ótimo! Continuando o agendamento com *${drName}*.\n\nQual data você prefere?`;
+    } else {
+      continueMsg = `Claro! Vamos continuar 😊 Qual especialidade ou médico você precisa?`;
+    }
+    await saveConversationTurn({
+      clinicId: envelope.clinic_id, fromNumber: envelope.from,
+      correlationId: envelope.correlation_id, userText: envelope.message_text,
+      assistantText: continueMsg, intentGroup: 'scheduling', intent: 'continue_booking', slots: null,
+    });
+    clearTimeout(timeoutId);
+    return res.json({ correlation_id: envelope.correlation_id, final_message: continueMsg, actions: [] });
+  }
+
   // FIX v5.4: Handler para botão "Tirar uma dúvida"
   if (envelope.intent_override === 'ask_question') {
     const askMsg = `Claro! Posso te ajudar com informações sobre:\n\n` +
@@ -2467,9 +2597,9 @@ const ENCERRAMENTO_PATTERNS = [
   /^(obrigad[ao]|brigad[ao]|vlw|valeu)\s*(!|\.)*$/i,
   /^(muito\s+)?obrigad[ao]/i,
   /^(agradec|thanks|thank)/i,
-  // Despedidas
+  // Despedidas (saudações de horário SOZINHAS não encerram — são saudações)
+  // "bom dia", "boa tarde", "boa noite" sozinhos = saudação, não encerramento
   /^(tchau|ate\s*(logo|mais|breve)|bye|flw|falou|fui)/i,
-  /^(bom\s*dia|boa\s*(tarde|noite))\s*(!|\.)*$/i,
   // Encerramento implícito
   /^(s[oó]\s*(isso|era\s*isso)|era\s*s[oó]\s*isso|t[aá]\s*(bom|certo|ok))/i,
   /^(ok|beleza|blz|suave|tranquilo|perfeito)\s*(!|\.)*$/i,
@@ -2525,6 +2655,80 @@ if (isEncerramento) {
     actions: [],
     debug: DEBUG ? { intercepted: true, type: 'encerramento', booking_reset: shouldResetBooking } : undefined,
   });
+}
+
+// ======================================================
+// CORREÇÃO PROBLEMA-2 e PROBLEMA-3: Interceptor de perguntas informativas
+// Quando a mensagem contém DÚVIDA (preço, convênio, pagamento) E há um
+// agendamento em andamento, responde a dúvida PRIMEIRO antes de retomar.
+// Isso garante que o bot nunca ignore uma pergunta do usuário.
+// ======================================================
+const messageHasInfoQuestion = detectInfoQuestion(envelope.message_text);
+const bookingStateNow = conversationState?.booking_state;
+const isInActiveBooking = bookingStateNow &&
+  ![BOOKING_STATES.IDLE, BOOKING_STATES.BOOKED].includes(bookingStateNow);
+
+if (messageHasInfoQuestion) {
+  console.log(`[INFO_INTERCEPTOR] Pergunta informativa detectada: "${envelope.message_text.substring(0, 60)}" | booking_state=${bookingStateNow}`);
+
+  // Buscar KB de convênios/preços/pagamento para responder diretamente
+  let infoAnswer = '';
+  try {
+    const { data: kbInfo } = await supabase
+      .from('clinic_kb')
+      .select('title, content')
+      .eq('clinic_id', envelope.clinic_id)
+      .or('title.ilike.%onvênio%,title.ilike.%alor%,title.ilike.%pagamento%,title.ilike.%preço%,title.ilike.%plano%')
+      .limit(4);
+
+    if (kbInfo && kbInfo.length > 0) {
+      infoAnswer = kbInfo.map(k => `*${k.title}*: ${k.content}`).join('\n\n');
+    }
+  } catch (e) { console.warn('[INFO_INTERCEPTOR] KB fetch error:', e.message); }
+
+  // Determinar se a mensagem também contém intenção de agendar
+  const alsoWantsToSchedule = /\b(marcar|agendar|consulta|horário|vaga|agendar)\b/i.test(envelope.message_text) ||
+    interceptarIntencaoDireta(envelope.message_text) === 'schedule_new';
+
+  // Se não temos KB, deixar o LLM do scheduling agent responder
+  // mas injetar instrução para responder a dúvida PRIMEIRO
+  if (!infoAnswer && isInActiveBooking) {
+    // Injetar flag no estado para que o scheduling agent saiba
+    // que deve responder a pergunta antes de continuar o agendamento
+    await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+      pending_info_question: envelope.message_text,
+    });
+    // Continua fluxo normal — o system prompt vai captar o flag
+  } else if (infoAnswer) {
+    // Temos resposta na KB — retornar diretamente sem chamar LLM
+    let finalInfoMsg = infoAnswer;
+    if (alsoWantsToSchedule) {
+      finalInfoMsg += '\n\n---\nGostaria de agendar uma consulta? 😊';
+    } else if (isInActiveBooking) {
+      finalInfoMsg += '\n\n---\nPosso continuar seu agendamento quando quiser 😊';
+    }
+
+    await saveConversationTurn({
+      clinicId: envelope.clinic_id, fromNumber: envelope.from,
+      correlationId: envelope.correlation_id, userText: envelope.message_text,
+      assistantText: finalInfoMsg, intentGroup: 'other', intent: 'info_question_answered', slots: null,
+    });
+    clearTimeout(timeoutId);
+    return res.json({
+      correlation_id: envelope.correlation_id,
+      final_message: finalInfoMsg,
+      actions: alsoWantsToSchedule || isInActiveBooking ? [{
+        type: 'send_interactive_buttons',
+        payload: {
+          buttons: [
+            { id: 'schedule_new',      title: '📅 Agendar consulta' },
+            { id: 'ask_question',      title: '❓ Outra dúvida' },
+          ],
+        },
+      }] : [],
+      debug: DEBUG ? { source: 'info_interceptor_kb', has_kb: true } : undefined,
+    });
+  }
 }
 
 // ======================================================
@@ -2619,6 +2823,44 @@ if (intentoDireto) {
     }
   }
 
+  // Handler de saudações simples — resposta imediata sem LLM
+  if (intentoDireto === 'greeting') {
+    const greetHour = Number(new Date().toLocaleString('pt-BR', { hour: 'numeric', hour12: false, timeZone: clinicRules?.timezone || 'America/Cuiaba' }));
+    const greetSd = greetHour < 12 ? 'Bom dia' : greetHour < 18 ? 'Boa tarde' : 'Boa noite';
+    const isInBooking = conversationState?.booking_state &&
+      ![BOOKING_STATES.IDLE, BOOKING_STATES.BOOKED].includes(conversationState.booking_state);
+    let greetReply;
+    if (isInBooking && conversationState?.doctor_name) {
+      greetReply = `${greetSd}! 😊 Estávamos no agendamento com *${conversationState.doctor_name}*. Quer continuar ou prefere pausar?`;
+    } else {
+      greetReply = `${greetSd}! Sou a Lara 😊 Como posso te ajudar hoje?`;
+    }
+    await saveConversationTurn({
+      clinicId: envelope.clinic_id, fromNumber: envelope.from,
+      correlationId: envelope.correlation_id, userText: envelope.message_text,
+      assistantText: greetReply, intentGroup: 'other', intent: 'greeting', slots: null,
+    });
+    clearTimeout(timeoutId);
+    return res.json({
+      correlation_id: envelope.correlation_id,
+      final_message: greetReply,
+      actions: isInBooking ? [{
+        type: 'send_interactive_buttons',
+        payload: { buttons: [
+          { id: 'continue_booking', title: '▶️ Continuar agendamento' },
+          { id: 'schedule_new',     title: '🔄 Começar do zero' },
+        ]},
+      }] : [{
+        type: 'send_interactive_buttons',
+        payload: { buttons: [
+          { id: 'schedule_new',      title: '📅 Agendar consulta' },
+          { id: 'view_appointments', title: '📋 Meus agendamentos' },
+          { id: 'ask_question',      title: '❓ Tirar uma dúvida' },
+        ]},
+      }],
+    });
+  }
+
   // FIX v5.3: Handler "esta semana" / "próxima semana" por texto
   if (intentoDireto === 'week_current' || intentoDireto === 'week_next') {
     const isCurrentWeek = intentoDireto === 'week_current';
@@ -2701,6 +2943,7 @@ if (intentoDireto) {
   step++;
 } else {
   // ── INTERCEPTOR NUMÉRICO: "4", "4)", "4) Quinta-feira, ..." → 4ª opção da lista ──
+  // CORREÇÃO PROBLEMA-4: Tratar também o caso onde idx >= sugDates.length com aviso claro
   // Captura: dígito puro OU dígito seguido de ) . ou espaço (usuário copiou a opção inteira)
   // O índice vem SEMPRE do número, nunca do texto da opção — determinístico.
   const numericMsg = envelope.message_text.trim().match(/^([1-9])[).\s]|^([1-9])$/);
@@ -2891,6 +3134,20 @@ if (intentoDireto) {
         };
         step++;
       }
+    } else if (numericMsg && idx >= 0 && (sugDates.length > 0 || sugSlots.length > 0)) {
+      // CORREÇÃO PROBLEMA-4: Usuário digitou um número válido mas fora do range da lista apresentada
+      // Ex: lista tem 3 datas mas usuário digitou "5"
+      const listaDisponivel = sugSlots.length > 0 ? sugSlots : sugDates;
+      const totalOpcoes = listaDisponivel.length;
+      console.log(`[NUMERIC_INTERCEPT] Índice "${numericDigit}" fora do range (lista tem ${totalOpcoes} itens)`);
+      const rangeMsg = `A opção ${numericDigit} não está disponível. Temos ${totalOpcoes} opção${totalOpcoes !== 1 ? 'ões' : ''} — por favor, escolha um número entre 1 e ${totalOpcoes}.`;
+      await saveConversationTurn({
+        clinicId: envelope.clinic_id, fromNumber: envelope.from,
+        correlationId: envelope.correlation_id, userText: envelope.message_text,
+        assistantText: rangeMsg, intentGroup: 'scheduling', intent: 'numeric_out_of_range', slots: null,
+      });
+      clearTimeout(timeoutId);
+      return res.json({ correlation_id: envelope.correlation_id, final_message: rangeMsg, actions: [] });
     }
   }
 
@@ -4275,6 +4532,13 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       intent: extracted?.intent,
       slots: extracted?.slots,
     });
+
+    // Limpar pending_info_question após o agente responder (evitar persistência indesejada)
+    if (conversationState?.pending_info_question) {
+      await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+        pending_info_question: null,
+      });
+    }
 
     // CORREÇÃO 5: Atualizar conversation_stage com base no intent_group
     // para que o estado reflita o estágio atual da conversa
