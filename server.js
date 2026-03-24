@@ -3609,6 +3609,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             last_suggested_slots: toolResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
             booking_state: BOOKING_STATES.COLLECTING_DATE,
             stuck_counter_slots: 0,
+            preferred_date: null,
+            preferred_date_iso: null,
             ...(updatedState.doctor_id ? { doctor_id: updatedState.doctor_id } : {}),
             ...(updatedState.doctor_name ? { doctor_name: updatedState.doctor_name } : {}),
           });
@@ -3933,6 +3935,25 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         for (const toolCall of choice.message.tool_calls) {
           // Verificar limite de chamadas por tool
           const toolName = toolCall.function.name;
+
+          // ANTI-LOOP: Bloquear verificar_disponibilidade quando em COLLECTING_DATE.
+          // Neste estado não há preferred_date válida — o LLM pode tentar re-verificar
+          // uma data obsoleta do contexto histórico, gerando loop de "Não encontrei horários".
+          if (toolName === 'verificar_disponibilidade' &&
+              updatedState?.booking_state === BOOKING_STATES.COLLECTING_DATE) {
+            log.warn({ booking_state: updatedState.booking_state }, '[ANTI-LOOP] verificar_disponibilidade bloqueada em COLLECTING_DATE');
+            agentMessages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: JSON.stringify({
+                success: false,
+                blocked: true,
+                message: 'Aguardando paciente selecionar nova data. Use buscar_proximas_datas para mostrar datas disponíveis, ou aguarde a seleção do usuário.',
+              }),
+            });
+            continue;
+          }
+
           toolCallCount[toolName] = (toolCallCount[toolName] || 0) + 1;
           if (toolCallCount[toolName] > MAX_CALLS_PER_TOOL) {
             log.warn({ tool: toolName, count: toolCallCount[toolName] }, '[LOOP] Tool chamada mais de uma vez neste ciclo — bloqueando');
@@ -4020,6 +4041,13 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
                     `Não invente outros horários. Não pergunte a data novamente.`,
                 });
               } else {
+                // Busca também vazia: limpar preferred_date para não fazer loop nas próximas msgs
+                await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+                  preferred_date: null,
+                  preferred_date_iso: null,
+                  booking_state: BOOKING_STATES.IDLE,
+                  stuck_counter_slots: 0,
+                });
                 agentMessages.push({
                   role: 'system',
                   content: '[BUSCA AUTOMÁTICA DE ALTERNATIVAS] Não encontrei horários disponíveis nos próximos 14 dias. ' +
@@ -4052,6 +4080,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               last_suggested_dates: datesWithSlots,
               last_suggested_slots: flatSlots,
               booking_state: BOOKING_STATES.COLLECTING_DATE,
+              preferred_date: null,
+              preferred_date_iso: null,
               ...(doctorIdFromTool ? { doctor_id: doctorIdFromTool } : {}),
               ...(doctorNameFromTool ? { doctor_name: doctorNameFromTool } : {}),
             });
