@@ -2836,21 +2836,33 @@ if (intentoDireto) {
           }
         }
 
-        // Sem doctor_id ou sem datas disponíveis — cair no fluxo normal (REGRA 1)
+        // Sem doctor_id ou sem datas disponíveis — retornar erro imediato e limpar preferred_date
+        // para evitar que REGRA 1 re-dispare verificar_disponibilidade em loop nas próximas mensagens
         await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
-          preferred_date: chosenDateISO,
-          preferred_date_iso: chosenDateISO,
-          booking_state: BOOKING_STATES.AWAITING_SLOTS,
+          preferred_date: null,
+          preferred_date_iso: null,
+          booking_state: BOOKING_STATES.COLLECTING_DATE,
           last_suggested_slots: [],
         });
-        // Atualizar activeConvState para que mergeExtractedSlots parta do estado correto
-        activeConvState = {
-          ...activeConvState,
-          preferred_date: chosenDateISO,
-          preferred_date_iso: chosenDateISO,
-          booking_state: BOOKING_STATES.AWAITING_SLOTS,
-          last_suggested_slots: [],
-        };
+        const errorMsg = `Essa data não tem horários disponíveis. Por favor, escolha outra data ou entre em contato com a clínica.`;
+        await saveConversationTurn({
+          clinicId: envelope.clinic_id,
+          fromNumber: envelope.from,
+          correlationId: envelope.correlation_id,
+          userText: envelope.message_text,
+          assistantText: errorMsg,
+          intentGroup: 'scheduling',
+          intent: 'no_slots_no_fallback',
+          slots: null,
+        });
+        clearTimeout(timeoutId);
+        return res.json({
+          correlation_id: envelope.correlation_id,
+          final_message: errorMsg,
+          actions: [],
+          debug: DEBUG ? { source: 'numeric_intercept_no_slots_no_fallback', date: chosenDateISO } : undefined,
+        });
+        // NOTA: código abaixo é inalcançável quando acima retorna — mantido para não quebrar lint
         extracted = {
           intent_group: 'scheduling',
           intent: 'schedule_new',
@@ -3725,8 +3737,12 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       } else if (!validation.valid) {
         // CORREÇÃO 2: Avançar booking_state para COLLECTING_DATE para evitar
         // que o interceptor dispare novamente na próxima mensagem (loop)
+        // FIX LOOP: Limpar preferred_date para que o LLM não re-invoque verificar_disponibilidade
+        // com a data antiga na próxima mensagem (ex: "oi tudo bem" → loop de "Não encontrei horários")
         await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
           booking_state: BOOKING_STATES.COLLECTING_DATE,
+          preferred_date: null,
+          preferred_date_iso: null,
         });
         decided = {
           decision_type: 'proceed',
@@ -3753,6 +3769,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             last_suggested_dates: availResult.dates,
             last_suggested_slots: availResult.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date_iso || d.date, time: s }))),
             booking_state: BOOKING_STATES.COLLECTING_DATE,
+            preferred_date: null,
+            preferred_date_iso: null,
             ...(updatedState.doctor_id ? { doctor_id: updatedState.doctor_id } : {}),
             ...(updatedState.doctor_name ? { doctor_name: updatedState.doctor_name } : {}),
           });
@@ -3981,6 +3999,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
                   last_suggested_slots: fallbackRes.dates.flatMap(d => (d.slots || []).map(s => ({ date: d.date, time: s }))),
                   booking_state: BOOKING_STATES.COLLECTING_DATE,
                   stuck_counter_slots: 0,
+                  preferred_date: null,
+                  preferred_date_iso: null,
                 });
                 // CORREÇÃO 3: Usar mensagem já formatada com horários reais
                 const fallbackMsg = fallbackRes.message && fallbackRes.message.includes('horários disponíveis')
