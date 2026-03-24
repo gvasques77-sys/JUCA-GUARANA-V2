@@ -2761,12 +2761,13 @@ const isInActiveBooking = bookingStateNow &&
   bookingStateNow !== BOOKING_STATES.IDLE;
 
 if (messageHasInfoQuestion) {
-  console.log(`[INFO_INTERCEPTOR] Pergunta informativa detectada: "${envelope.message_text.substring(0, 60)}" | booking_state=${bookingStateNow}`);
+  console.log(`[INFO][1/5] msg="${envelope.message_text.substring(0, 80)}" | booking_state=${bookingStateNow} | from=${envelope.from}`);
 
   // ── STEP 1: Identificar médico (estado > nome na mensagem) ──────────────
   let doctorIdForInfo   = conversationState?.doctor_id   || null;
   let doctorNameForInfo = conversationState?.doctor_name || null;
   let doctorSpecialty   = conversationState?.specialty   || null;
+  let doctorSource      = doctorIdForInfo ? 'state' : null;
 
   if (!doctorIdForInfo) {
     // Tenta detectar nome do médico na mensagem ("quanto valor de marcos?")
@@ -2787,13 +2788,15 @@ if (messageHasInfoQuestion) {
             doctorIdForInfo   = doc.id;
             doctorNameForInfo = doc.name;
             doctorSpecialty   = doc.specialty || doctorSpecialty;
-            console.log(`[INFO_INTERCEPTOR] Médico detectado na mensagem: ${doc.name} (${doc.id})`);
+            doctorSource      = 'message_text';
             break;
           }
         }
       }
-    } catch (e) { console.warn('[INFO_INTERCEPTOR] doctor lookup error:', e.message); }
+    } catch (e) { console.warn('[INFO][ERROR] doctor lookup:', e.message); }
   }
+
+  console.log(`[INFO][2/5] médico=${doctorNameForInfo || 'não identificado'} | fonte_médico=${doctorSource || 'nenhuma'} | booking_ativo=${isInActiveBooking}`);
 
   // ── STEP 2: PRIORIDADE — preço real do médico (doctor_services) ─────────
   // Isso é sempre a resposta correta quando um médico está identificado.
@@ -2819,12 +2822,16 @@ if (messageHasInfoQuestion) {
           priceAnswer = `A consulta com *${doctorNameForInfo}*${specStr} custa:\n${priceLines.join('\n')}`;
         }
       }
-    } catch (e) { console.warn('[INFO_INTERCEPTOR] doctor_services fetch error:', e.message); }
+      console.log(`[INFO][3/5] fonte=doctor_services | preço_encontrado=${!!priceAnswer} | rows=${dsRows?.length || 0}`);
+    } catch (e) { console.warn('[INFO][ERROR] doctor_services fetch:', e.message); }
+  } else {
+    console.log(`[INFO][3/5] fonte=doctor_services | skipped (sem médico identificado)`);
   }
 
   // ── STEP 3: Se há preço → responder DIRETAMENTE, sem KB ─────────────────
   if (priceAnswer) {
     const finalPriceMsg = `${priceAnswer}\n\nSe for por convênio, posso verificar a cobertura também. Deseja agendar? 😊`;
+    console.log(`[INFO][4/5] fonte_resposta=doctor_services | resposta="${finalPriceMsg.substring(0, 100)}"`);
     await saveConversationTurn({
       clinicId: envelope.clinic_id, fromNumber: envelope.from,
       correlationId: envelope.correlation_id, userText: envelope.message_text,
@@ -2857,7 +2864,8 @@ if (messageHasInfoQuestion) {
     if (kbInfo && kbInfo.length > 0) {
       kbAnswer = kbInfo.map(k => `*${k.title}*: ${k.content}`).join('\n\n');
     }
-  } catch (e) { console.warn('[INFO_INTERCEPTOR] KB fetch error:', e.message); }
+    console.log(`[INFO][3/5] fonte=clinic_kb | kb_encontrado=${!!kbAnswer} | rows=${kbInfo?.length || 0}`);
+  } catch (e) { console.warn('[INFO][ERROR] KB fetch:', e.message); }
 
   const alsoWantsToSchedule = /\b(marcar|agendar|consulta|horário|vaga)\b/i.test(envelope.message_text) ||
     interceptarIntencaoDireta(envelope.message_text) === 'schedule_new';
@@ -2867,6 +2875,7 @@ if (messageHasInfoQuestion) {
     if (alsoWantsToSchedule)   finalKbMsg += '\n\n---\nGostaria de agendar uma consulta? 😊';
     else if (isInActiveBooking) finalKbMsg += '\n\n---\nPosso continuar seu agendamento quando quiser 😊';
 
+    console.log(`[INFO][4/5] fonte_resposta=clinic_kb | resposta="${finalKbMsg.substring(0, 100)}"`);
     await saveConversationTurn({
       clinicId: envelope.clinic_id, fromNumber: envelope.from,
       correlationId: envelope.correlation_id, userText: envelope.message_text,
@@ -2888,6 +2897,7 @@ if (messageHasInfoQuestion) {
   }
 
   // ── STEP 5: Nenhuma fonte encontrou resposta ─────────────────────────────
+  console.log(`[INFO][4/5] nenhuma fonte respondeu | booking_ativo=${isInActiveBooking}`);
   if (isInActiveBooking) {
     const noSrcMsg = bookingStateNow === BOOKING_STATES.BOOKED
       ? `Para informações sobre valores e formas de pagamento, recomendo confirmar diretamente com a clínica. 📞`
@@ -2912,7 +2922,7 @@ if (messageHasInfoQuestion) {
     });
   }
   // Se não há booking ativo e não encontrou resposta → deixa cair para o LLM
-  console.log(`[INFO_INTERCEPTOR] Sem resposta determinística, passando ao LLM.`);
+  console.log(`[INFO][5/5] fallthrough ao LLM (sem booking ativo, sem resposta determinística)`);
 }
 
 // ======================================================
@@ -2926,10 +2936,12 @@ if (conversationState?.booking_state === BOOKING_STATES.BOOKED && conversationSt
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9 ]/g, '').trim();
   const isAskingAboutAppointment = /\b(consulta|agenda|agendei|agendamento|horario|medico|quando|qual|data|marcado|confirmado|lembrar)\b/.test(bookedQuery);
+  console.log(`[BOOKED_INTERCEPTOR] state=BOOKED | isAskingAboutAppointment=${isAskingAboutAppointment} | query="${bookedQuery.substring(0, 60)}"`);
 
   if (isAskingAboutAppointment) {
     const cs = conversationState;
     const bookedMsg = `Seu agendamento está confirmado! ✅\n\n👤 Paciente: ${cs.patient_name || 'Você'}\n👨‍⚕️ Médico: ${cs.doctor_name}\n📅 Data: ${cs.preferred_date_iso || cs.preferred_date || '—'}\n🕐 Horário: ${cs.preferred_time || '—'}\n\nSe precisar de algo mais, é só chamar! 😊`;
+    console.log(`[BOOKED_INTERCEPTOR] retornando dados do agendamento: médico=${cs.doctor_name} | data=${cs.preferred_date_iso} | hora=${cs.preferred_time}`);
     await saveConversationTurn({
       clinicId: envelope.clinic_id, fromNumber: envelope.from,
       correlationId: envelope.correlation_id, userText: envelope.message_text,
