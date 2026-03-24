@@ -145,12 +145,12 @@ function detectInfoQuestion(text) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9 ]/g, '').trim();
   const INFO_PATTERNS = [
-    /\b(valor|preco|precos|valores|custa|custo)\b/,
+    /\b(valor|valores|preco|precos|custa|custo|vale|cobram?|cobranca)\b/,
     /\b(convenio|convenios|plano|planos|unimed|bradesco|amil|sulamerica|porto seguro)\b/,
     /\b(parcela|parcelam|parcelamento|cartao|credito|debito|pix|pagamento)\b/,
     /\b(duracao|dura|quanto tempo|demora)\b.*\b(consulta|procedimento|atendimento|sessao)\b/,
-    /\bquanto\b.*\b(custa|cobra|sai|fica|paga)\b/,
-    /\bqual\b.*\b(valor|preco)\b/,
+    /\bquanto\b.*\b(custa|cobra|sai|fica|paga|vale|custa)\b/,
+    /\bqual\b.*\b(valor|preco|custo)\b/,
     /\baceitam?\b.*\b(convenio|plano|cartao)\b/,
     /\b(formas?|meios?)\b.*\bpagamento\b/,
     /\bgostaria\b.*\b(saber|informac)\b/,
@@ -2774,7 +2774,8 @@ if (messageHasInfoQuestion) {
       const { data: allDocs } = await supabase
         .from('doctors')
         .select('id, name, specialty')
-        .eq('clinic_id', envelope.clinic_id);
+        .eq('clinic_id', envelope.clinic_id)
+        .eq('active', true);
       if (allDocs && allDocs.length > 0) {
         const msgNorm = envelope.message_text.toLowerCase()
           .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
