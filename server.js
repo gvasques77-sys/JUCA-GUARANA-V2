@@ -156,6 +156,66 @@ function _logFinalMsg(source, msg) {
   console.log(`[SEND_FINAL] fonte=${source}\n--- INÍCIO MENSAGEM ---\n${msg}\n--- FIM MENSAGEM ---`);
 }
 
+/**
+ * Auditoria completa de estado BOOKED antes de exibir dados ao usuário.
+ * Verifica origem do appointment_id, divergências de dados e campos ausentes.
+ * @param {string} ctx  - Contexto chamador (ex: 'BOOKED_GUARD', 'BOOKED_INTERCEPTOR')
+ * @param {object} cs   - conversation_state atual
+ * @param {string} from - telefone do usuário (envelope.from)
+ * @param {string} tz   - timezone da clínica
+ * @returns {{ rawDate, displayDate, rawTime, apptId, apptIdOrigin }}
+ */
+function _auditarEstadoBooked(ctx, cs, from, tz) {
+  const rawDate  = cs.preferred_date_iso || cs.preferred_date || null;
+  const rawTime  = cs.preferred_time || null;
+  const apptId   = cs.last_appointment_id || null;
+
+  // Formatar data para exibição (YYYY-MM-DD → DD/MM/YYYY)
+  let displayDate = rawDate;
+  if (rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+    const [y, m, d] = rawDate.split('-');
+    displayDate = `${d}/${m}/${y}`;
+  }
+
+  // Origem do appointment_id
+  const apptIdOrigin = apptId ? 'session_state' : 'missing';
+
+  // Log de auditoria estruturado
+  console.log(
+    `[${ctx}] ▶ AUDITORIA AGENDAMENTO\n` +
+    `  telefone       : ${from}\n` +
+    `  paciente       : ${cs.patient_name || 'null'}\n` +
+    `  appointment_id : ${apptId || 'AUSENTE'}\n` +
+    `  appt_id_origem : ${apptIdOrigin}\n` +
+    `  médico         : ${cs.doctor_name || 'null'} (id=${cs.doctor_id || 'null'})\n` +
+    `  especialidade  : ${cs.specialty || 'null'}\n` +
+    `  data_raw (DB)  : ${rawDate || 'null'}\n` +
+    `  data_display   : ${displayDate || 'null'}\n` +
+    `  horário_raw    : ${rawTime || 'null'}\n` +
+    `  timezone       : ${tz}\n` +
+    `  booking_state  : ${cs.booking_state}`
+  );
+
+  // ── WARNs por campo ausente ─────────────────────────────────────────────
+  if (!apptId)          console.warn(`[${ctx}][WARN] fallback=missing_last_appointment_id — last_appointment_id AUSENTE no estado`);
+  if (!cs.doctor_name)  console.warn(`[${ctx}][WARN] fallback=no_doctor_in_context — doctor_name AUSENTE no estado BOOKED`);
+  if (!rawDate)         console.warn(`[${ctx}][WARN] fallback=no_date — preferred_date_iso AUSENTE no estado`);
+  if (!rawTime)         console.warn(`[${ctx}][WARN] fallback=no_time — preferred_time AUSENTE no estado`);
+  if (!cs.patient_name) console.warn(`[${ctx}][WARN] paciente sem nome no estado — será exibido como 'Você'`);
+
+  // ── Divergências: dado no estado vs dado que será exibido ───────────────
+  // (Se a transformação introduziu erro, aparece aqui)
+  if (rawDate && displayDate === rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+    console.warn(`[${ctx}][WARN] DIVERGÊNCIA data — data_raw="${rawDate}" não foi convertida para DD/MM/YYYY (data_display="${displayDate}")`);
+  }
+  // Verificar se médico no estado é consistente com o que será exibido
+  if (cs.doctor_name && cs.doctor_name !== cs.doctor_name.trim()) {
+    console.warn(`[${ctx}][WARN] DIVERGÊNCIA médico — doctor_name tem espaços extras: "${cs.doctor_name}"`);
+  }
+
+  return { rawDate, displayDate, rawTime, apptId, apptIdOrigin };
+}
+
 function detectInfoQuestion(text) {
   if (!text) return false;
   const normalized = text.toLowerCase()
@@ -2294,25 +2354,29 @@ if (previousMessages.length === 0) {
     // O greeting redefinia booking_state→IDLE e apagava doctor_id/nome/data — bug crítico.
     if (isFirstMessage && isBookedState) {
       const csB = conversationState;
-      const _tz2 = clinicRules?.timezone || 'America/Cuiaba';
-      const _rawDate2 = csB.preferred_date_iso || csB.preferred_date || null;
-      let _displayDate2 = _rawDate2;
-      if (_rawDate2 && /^\d{4}-\d{2}-\d{2}$/.test(_rawDate2)) {
-        const [y, m, d] = _rawDate2.split('-');
-        _displayDate2 = `${d}/${m}/${y}`;
+      const _tzG = clinicRules?.timezone || 'America/Cuiaba';
+      console.log(`[BOOKED_GUARD] ▶ Primeira mensagem com state=BOOKED — exibindo resumo (NÃO resetando estado)`);
+      const { rawDate: _rawDate2, displayDate: _displayDate2, rawTime: _rawTime2 } =
+        _auditarEstadoBooked('BOOKED_GUARD', csB, envelope.from, _tzG);
+
+      const bookedWelcomeMsg =
+        `Olá! Seu agendamento está confirmado ✅\n\n` +
+        `👤 Paciente: ${csB.patient_name || 'Você'}\n` +
+        `👨‍⚕️ Médico: ${csB.doctor_name || '—'}\n` +
+        `📅 Data: ${_displayDate2 || '—'}\n` +
+        `🕐 Horário: ${_rawTime2 || '—'}\n\n` +
+        `Como posso te ajudar?`;
+
+      // Divergência: verificar que a mensagem final reflete exatamente o estado
+      if (csB.doctor_name && !bookedWelcomeMsg.includes(csB.doctor_name)) {
+        console.warn(`[BOOKED_GUARD][WARN] DIVERGÊNCIA — doctor_name="${csB.doctor_name}" não aparece na mensagem final`);
       }
-      console.log(
-        `[BOOKED_GUARD] ▶ Primeira mensagem com state=BOOKED — exibindo resumo (NÃO resetando estado)\n` +
-        `  appointment_id : ${csB.last_appointment_id || 'AUSENTE'}\n` +
-        `  médico         : ${csB.doctor_name || 'null'} (id=${csB.doctor_id || 'null'})\n` +
-        `  data_raw       : ${_rawDate2 || 'null'}\n` +
-        `  data_display   : ${_displayDate2 || 'null'}\n` +
-        `  horário        : ${csB.preferred_time || 'null'}\n` +
-        `  timezone       : ${_tz2}`
-      );
-      if (!csB.doctor_name) console.warn(`[BOOKED_GUARD][WARN] doctor_name AUSENTE no estado BOOKED`);
-      if (!csB.last_appointment_id) console.warn(`[BOOKED_GUARD][WARN] last_appointment_id AUSENTE — pode ser agendamento sem ID salvo`);
-      const bookedWelcomeMsg = `Olá! Seu agendamento está confirmado ✅\n\n👤 Paciente: ${csB.patient_name || 'Você'}\n👨‍⚕️ Médico: ${csB.doctor_name || '—'}\n📅 Data: ${_displayDate2 || '—'}\n🕐 Horário: ${csB.preferred_time || '—'}\n\nComo posso te ajudar?`;
+      if (_displayDate2 && !bookedWelcomeMsg.includes(_displayDate2)) {
+        console.warn(`[BOOKED_GUARD][WARN] DIVERGÊNCIA — data_display="${_displayDate2}" não aparece na mensagem final`);
+      }
+      if (_rawTime2 && !bookedWelcomeMsg.includes(_rawTime2)) {
+        console.warn(`[BOOKED_GUARD][WARN] DIVERGÊNCIA — horário="${_rawTime2}" não aparece na mensagem final`);
+      }
       _logFinalMsg('booked_guard', bookedWelcomeMsg);
       await saveConversationTurn({
         clinicId: envelope.clinic_id, fromNumber: envelope.from,
@@ -2840,6 +2904,9 @@ if (messageHasInfoQuestion) {
     doctorSource      = 'state_override';
   }
 
+  if (!doctorIdForInfo) {
+    console.warn(`[INFO][WARN] fallback=no_doctor_in_context — nenhum médico no estado nem na mensagem`);
+  }
   console.log(`[INFO][2/5] médico="${doctorNameForInfo || 'NÃO IDENTIFICADO'}" | fonte_médico=${doctorSource || 'nenhuma'} | id=${doctorIdForInfo || 'null'} | especialidade=${doctorSpecialty || 'null'} | booking_ativo=${isInActiveBooking}`);
 
   // ── STEP 2: PRIORIDADE — preço real do médico (doctor_services) ─────────
@@ -2854,7 +2921,7 @@ if (messageHasInfoQuestion) {
         .limit(5);
 
       if (!dsRows || dsRows.length === 0) {
-        console.warn(`[INFO][WARN] doctor_services: ZERO rows para doctor_id=${doctorIdForInfo} clinic_id=${envelope.clinic_id} — médico sem preço cadastrado`);
+        console.warn(`[INFO][WARN] fallback=no_price_found — doctor_services: ZERO rows para doctor_id=${doctorIdForInfo} clinic_id=${envelope.clinic_id}`);
       } else {
         const priceLines = dsRows.map(ds => {
           const price = ds.custom_price || ds.services?.price;
@@ -2870,7 +2937,7 @@ if (messageHasInfoQuestion) {
           const specStr = doctorSpecialty ? ` (${doctorSpecialty})` : '';
           priceAnswer = `A consulta com *${doctorNameForInfo}*${specStr} custa:\n${priceLines.join('\n')}`;
         } else {
-          console.warn(`[INFO][WARN] doctor_services: ${dsRows.length} rows mas NENHUMA com preço válido | doctor_id=${doctorIdForInfo}`);
+          console.warn(`[INFO][WARN] fallback=no_price_found — doctor_services: ${dsRows.length} rows mas NENHUMA com preço válido | doctor_id=${doctorIdForInfo}`);
         }
       }
       console.log(`[INFO][3/5] fonte=doctor_services | rows=${dsRows?.length || 0} | preço_montado=${!!priceAnswer}`);
@@ -2905,7 +2972,7 @@ if (messageHasInfoQuestion) {
 
   // Desvio: médico identificado mas sem preço → vai usar KB (inesperado)
   if (doctorIdForInfo) {
-    console.warn(`[INFO][WARN] médico identificado (${doctorNameForInfo}) mas SEM preço em doctor_services — consultando KB como fallback`);
+    console.warn(`[INFO][WARN] fallback=kb_fallback — médico identificado (${doctorNameForInfo}) mas SEM preço em doctor_services`);
   }
 
   // ── STEP 4: Sem preço → KB genérica (convênios/pagamento) ───────────────
@@ -2956,8 +3023,8 @@ if (messageHasInfoQuestion) {
   console.log(`[INFO][5/5] nenhuma fonte respondeu | booking_ativo=${isInActiveBooking}`);
 
   if (isInActiveBooking) {
-    // [WARN] Não deveria chegar aqui com booking ativo — indica dado faltante no cadastro
-    console.warn(`[INFO][WARN] sem resposta determinística COM booking ativo (state=${bookingStateNow}) — retornando fallback (NÃO vai para LLM)`);
+    // Nunca deve chegar aqui com booking ativo — indica dado faltante (médico sem preço e KB vazia)
+    console.warn(`[INFO][WARN] fallback=no_price_found+kb_fallback — sem resposta determinística COM booking ativo (state=${bookingStateNow}) — retornando fallback (NÃO vai para LLM)`);
     const noSrcMsg = bookingStateNow === BOOKING_STATES.BOOKED
       ? `Para informações sobre valores e formas de pagamento, recomendo confirmar diretamente com a clínica. 📞`
       : `Sobre sua dúvida: não encontrei essa informação no sistema. Recomendo confirmar diretamente com a clínica. 📞\n\nPosso continuar com seu agendamento?`;
@@ -2982,7 +3049,7 @@ if (messageHasInfoQuestion) {
     });
   }
   // Sem booking ativo e sem resposta → LLM (comportamento correto para perguntas abertas)
-  console.log(`[INFO][5/5] ▶ fallthrough ao LLM (IDLE, sem fonte determinística)`);
+  console.log(`[INFO][5/5] fallback=llm_fallthrough_allowed — IDLE sem fonte determinística → LLM`);
 }
 
 // ======================================================
@@ -3000,37 +3067,28 @@ if (conversationState?.booking_state === BOOKING_STATES.BOOKED && conversationSt
 
   if (isAskingAboutAppointment) {
     const cs = conversationState;
+    const _tzI = clinicRules?.timezone || 'America/Cuiaba';
+    const { rawDate: _rawDate, displayDate: _displayDate, rawTime: _rawTime } =
+      _auditarEstadoBooked('BOOKED_INTERCEPTOR', cs, envelope.from, _tzI);
 
-    // ── Log de data/hora com rastreamento completo ──────────────────────────
-    const _tz = clinicRules?.timezone || 'America/Cuiaba';
-    const _rawDate    = cs.preferred_date_iso || cs.preferred_date || null;
-    const _rawTime    = cs.preferred_time || null;
-    const _apptId     = cs.last_appointment_id || null;
-    // Formatar data para exibição (YYYY-MM-DD → DD/MM/YYYY)
-    let _displayDate = _rawDate;
-    if (_rawDate && /^\d{4}-\d{2}-\d{2}$/.test(_rawDate)) {
-      const [y, m, d] = _rawDate.split('-');
-      _displayDate = `${d}/${m}/${y}`;
-    }
-    console.log(
-      `[BOOKED_INTERCEPTOR] ▶ AUDITORIA AGENDAMENTO\n` +
-      `  appointment_id : ${_apptId || 'AUSENTE — state sem last_appointment_id'}\n` +
-      `  médico         : ${cs.doctor_name} (id=${cs.doctor_id || 'null'})\n` +
-      `  paciente       : ${cs.patient_name || 'null'}\n` +
-      `  data_raw (DB)  : ${_rawDate || 'null'}\n` +
-      `  data_display   : ${_displayDate || 'null'}\n` +
-      `  horário        : ${_rawTime || 'null'}\n` +
-      `  timezone       : ${_tz}\n` +
-      `  booking_state  : ${cs.booking_state}`
-    );
-    if (!_apptId) {
-      console.warn(`[BOOKED_INTERCEPTOR][WARN] last_appointment_id AUSENTE no estado — agendamento pode ser de sessão anterior`);
-    }
-    if (!_rawDate) {
-      console.warn(`[BOOKED_INTERCEPTOR][WARN] preferred_date_iso AUSENTE — data não será exibida corretamente`);
-    }
+    const bookedMsg =
+      `Seu agendamento está confirmado! ✅\n\n` +
+      `👤 Paciente: ${cs.patient_name || 'Você'}\n` +
+      `👨‍⚕️ Médico: ${cs.doctor_name}\n` +
+      `📅 Data: ${_displayDate || '—'}\n` +
+      `🕐 Horário: ${_rawTime || '—'}\n\n` +
+      `Se precisar de algo mais, é só chamar! 😊`;
 
-    const bookedMsg = `Seu agendamento está confirmado! ✅\n\n👤 Paciente: ${cs.patient_name || 'Você'}\n👨‍⚕️ Médico: ${cs.doctor_name}\n📅 Data: ${_displayDate || '—'}\n🕐 Horário: ${_rawTime || '—'}\n\nSe precisar de algo mais, é só chamar! 😊`;
+    // Divergência: verificar que a mensagem final reflete exatamente o estado
+    if (cs.doctor_name && !bookedMsg.includes(cs.doctor_name)) {
+      console.warn(`[BOOKED_INTERCEPTOR][WARN] DIVERGÊNCIA — doctor_name="${cs.doctor_name}" não aparece na mensagem final`);
+    }
+    if (_displayDate && !bookedMsg.includes(_displayDate)) {
+      console.warn(`[BOOKED_INTERCEPTOR][WARN] DIVERGÊNCIA — data_display="${_displayDate}" não aparece na mensagem final`);
+    }
+    if (_rawTime && !bookedMsg.includes(_rawTime)) {
+      console.warn(`[BOOKED_INTERCEPTOR][WARN] DIVERGÊNCIA — horário="${_rawTime}" não aparece na mensagem final`);
+    }
     _logFinalMsg('booked_interceptor', bookedMsg);
     await saveConversationTurn({
       clinicId: envelope.clinic_id, fromNumber: envelope.from,
