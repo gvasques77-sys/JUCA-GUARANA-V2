@@ -1049,15 +1049,16 @@ export async function cancelarAgendamento(clinicId, appointmentId, reason = null
             return { success: false, message: 'Não é possível cancelar consulta já realizada.' };
         }
 
-        await supabase
+        const { error: updateError } = await supabase
             .from('appointments')
-            .update({
-                status: 'cancelled',
-                cancellation_reason: reason,
-                cancelled_by: cancelledBy
-            })
+            .update({ status: 'cancelled' })
             .eq('id', appointmentId)
             .eq('clinic_id', clinicId);
+
+        if (updateError) {
+            console.error(`[cancelarAgendamento] Erro no UPDATE id=${appointmentId}:`, updateError.message);
+            return { success: false, message: 'Erro ao cancelar o agendamento no banco de dados.', error: updateError.message };
+        }
 
         await invalidateSlotsCache(clinicId, appointment.doctor_id, appointment.appointment_date);
 

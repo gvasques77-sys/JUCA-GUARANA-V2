@@ -248,7 +248,13 @@ function interceptarIntencaoDireta(text) {
   const normalized = text.toLowerCase().trim()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9 ]/g, '').trim();
-  return INTENCOES_DIRETAS[normalized] || null;
+  // Match exato no mapa
+  if (INTENCOES_DIRETAS[normalized]) return INTENCOES_DIRETAS[normalized];
+  // Prefixo "cancelar/desmarcar ..." → sempre 'cancel' (ex: "cancelar carlos e marcos")
+  if (/^(cancelar|desmarcar|quero cancelar|quero desmarcar|preciso cancelar|gostaria de cancelar)\b/.test(normalized)) return 'cancel';
+  // Prefixo "agendar/marcar ..." quando não há conflito com cancelar → 'schedule_new'
+  // (não adicionar aqui — risco de override; deixar para o LLM)
+  return null;
 }
 
 // ======================================================
@@ -3309,6 +3315,64 @@ if (intentoDireto) {
     }
   }
 
+  // ── Handler CANCEL determinístico — sem LLM ──────────────────────────────
+  // Garante que "cancelar X", "cancelar todos" etc. nunca sejam confundidos
+  // com agendamento. Lista os agendamentos e salva IDs no estado para uso posterior.
+  if (intentoDireto === 'cancel') {
+    try {
+      const cancelList = await executeSchedulingTool(
+        'listar_meus_agendamentos',
+        { patient_phone: envelope.from },
+        { clinicId: envelope.clinic_id, userPhone: envelope.from }
+      );
+      let cancelMsg;
+      const activeAppts = (cancelList?.appointments || []).filter(
+        a => !['cancelled', 'completed', 'no_show'].includes(a.status)
+      );
+      if (!cancelList?.success || activeAppts.length === 0) {
+        cancelMsg = 'Você não tem agendamentos ativos para cancelar. 😊';
+      } else if (activeAppts.length === 1) {
+        const a = activeAppts[0];
+        const apptDate = a.appointment_date || a.date || '—';
+        const apptTime = a.start_time || a.time || '—';
+        const apptDoc  = a.doctors?.name || a.doctor_name || 'Médico';
+        cancelMsg = `Encontrei este agendamento:\n\n📅 ${apptDate} às ${apptTime} — *${apptDoc}*\n\nDeseja cancelar? Responda *sim* para confirmar.`;
+        await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+          booking_state: BOOKING_STATES.CANCELLING,
+          pending_cancel_id: a.id,
+          pending_cancel_desc: `${apptDate} às ${apptTime} — ${apptDoc}`,
+        });
+      } else {
+        const lines = activeAppts.map((a, i) => {
+          const apptDate = a.appointment_date || a.date || '—';
+          const apptTime = a.start_time || a.time || '—';
+          const apptDoc  = a.doctors?.name || a.doctor_name || 'Médico';
+          return `${i + 1}. 📅 ${apptDate} às ${apptTime} — *${apptDoc}*`;
+        }).join('\n');
+        cancelMsg = `Seus agendamentos ativos:\n\n${lines}\n\nQual você deseja cancelar? Responda com o número ou diga *todos* para cancelar todos.`;
+        await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+          booking_state: BOOKING_STATES.CANCELLING,
+          pending_cancel_list: activeAppts.map(a => ({
+            id: a.id,
+            desc: `${a.appointment_date || a.date} às ${a.start_time || a.time} — ${a.doctors?.name || a.doctor_name || 'Médico'}`,
+          })),
+          pending_cancel_id: null,
+        });
+      }
+      console.log(`[CANCEL_HANDLER] ${activeAppts.length} agendamentos encontrados | from=${envelope.from}`);
+      await saveConversationTurn({
+        clinicId: envelope.clinic_id, fromNumber: envelope.from,
+        correlationId: envelope.correlation_id, userText: envelope.message_text,
+        assistantText: cancelMsg, intentGroup: 'scheduling', intent: 'cancel_list', slots: null,
+      });
+      clearTimeout(timeoutId);
+      return res.json({ correlation_id: envelope.correlation_id, final_message: cancelMsg, actions: [] });
+    } catch (cancelErr) {
+      console.error('[CANCEL_HANDLER] Erro:', cancelErr?.message, cancelErr?.stack);
+      // se falhar, cai para o LLM
+    }
+  }
+
   // Handler de saudações simples — resposta imediata sem LLM
   if (intentoDireto === 'greeting') {
     const greetHour = Number(new Date().toLocaleString('pt-BR', { hour: 'numeric', hour12: false, timeZone: clinicRules?.timezone || 'America/Cuiaba' }));
@@ -3887,6 +3951,104 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         actions: [],
         debug: DEBUG ? { extracted } : undefined,
       });
+    }
+
+    // ======================================================
+    // 7a) CANCELLING STATE HANDLER — confirmar/executar cancelamento
+    // ======================================================
+    if (updatedState.booking_state === BOOKING_STATES.CANCELLING) {
+      const _cancelMsg = envelope.message_text.toLowerCase().trim();
+      const _pendingId   = updatedState.pending_cancel_id;
+      const _pendingList = updatedState.pending_cancel_list || [];
+
+      // Usuário confirma cancelamento único: "sim"
+      if (_pendingId && /^(sim|s|yes|confirmar|ok|pode|pode ser|certo)$/.test(_cancelMsg)) {
+        try {
+          console.log(`[CANCELLING] Executando cancelamento: appointment_id=${_pendingId} from=${envelope.from}`);
+          const cancelResult = await executeSchedulingTool(
+            'cancelar_agendamento',
+            { appointment_id: _pendingId, motivo: 'Cancelado pelo paciente via WhatsApp' },
+            { clinicId: envelope.clinic_id, userPhone: envelope.from }
+          );
+          console.log(`[CANCELLING] Resultado:`, JSON.stringify(cancelResult));
+          await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+            booking_state: BOOKING_STATES.IDLE, pending_cancel_id: null,
+            pending_cancel_list: [], appointment_confirmed: false,
+          });
+          const cancelledMsg = cancelResult?.success
+            ? `✅ Agendamento cancelado: *${updatedState.pending_cancel_desc}*\n\nPosso ajudar com mais alguma coisa?`
+            : `Não consegui cancelar o agendamento. ${cancelResult?.message || ''} Tente novamente ou entre em contato com a clínica.`;
+          await saveConversationTurn({
+            clinicId: envelope.clinic_id, fromNumber: envelope.from,
+            correlationId: envelope.correlation_id, userText: envelope.message_text,
+            assistantText: cancelledMsg, intentGroup: 'scheduling', intent: 'cancel_confirmed', slots: null,
+          });
+          clearTimeout(timeoutId);
+          return res.json({ correlation_id: envelope.correlation_id, final_message: cancelledMsg, actions: [] });
+        } catch (cErr) {
+          console.error('[CANCELLING] Exceção ao cancelar:', cErr?.message, cErr?.stack);
+          const errMsg = 'Erro ao cancelar o agendamento. Por favor, tente novamente ou entre em contato com a clínica.';
+          clearTimeout(timeoutId);
+          return res.json({ correlation_id: envelope.correlation_id, final_message: errMsg, actions: [] });
+        }
+      }
+
+      // Usuário seleciona um número da lista ou diz "todos"
+      if (_pendingList.length > 0) {
+        const _numMatch = _cancelMsg.match(/^([1-9])/);
+        const _allMatch = /^(todos|all|tudo|todos eles)$/.test(_cancelMsg);
+        let _toCancel = [];
+        if (_numMatch) {
+          const idx = parseInt(_numMatch[1]) - 1;
+          if (idx >= 0 && idx < _pendingList.length) _toCancel = [_pendingList[idx]];
+        } else if (_allMatch) {
+          _toCancel = _pendingList;
+        }
+
+        if (_toCancel.length > 0) {
+          try {
+            const results = [];
+            for (const appt of _toCancel) {
+              console.log(`[CANCELLING] Cancelando appointment_id=${appt.id}`);
+              const r = await executeSchedulingTool(
+                'cancelar_agendamento',
+                { appointment_id: appt.id, motivo: 'Cancelado pelo paciente via WhatsApp' },
+                { clinicId: envelope.clinic_id, userPhone: envelope.from }
+              );
+              results.push({ desc: appt.desc, success: r?.success, msg: r?.message });
+              console.log(`[CANCELLING] ${appt.id}: success=${r?.success}`);
+            }
+            await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+              booking_state: BOOKING_STATES.IDLE, pending_cancel_id: null,
+              pending_cancel_list: [], appointment_confirmed: false,
+            });
+            const successCount = results.filter(r => r.success).length;
+            const failCount    = results.filter(r => !r.success).length;
+            let finalCancelMsg = successCount > 0
+              ? `✅ ${successCount} agendamento(s) cancelado(s) com sucesso!`
+              : '';
+            if (failCount > 0) finalCancelMsg += `\n⚠️ ${failCount} não foi possível cancelar — entre em contato com a clínica.`;
+            finalCancelMsg += '\n\nPosso ajudar com mais alguma coisa?';
+            await saveConversationTurn({
+              clinicId: envelope.clinic_id, fromNumber: envelope.from,
+              correlationId: envelope.correlation_id, userText: envelope.message_text,
+              assistantText: finalCancelMsg, intentGroup: 'scheduling', intent: 'cancel_confirmed', slots: null,
+            });
+            clearTimeout(timeoutId);
+            return res.json({ correlation_id: envelope.correlation_id, final_message: finalCancelMsg, actions: [] });
+          } catch (cErrList) {
+            console.error('[CANCELLING] Exceção na lista:', cErrList?.message, cErrList?.stack);
+            const errMsg = 'Erro ao processar os cancelamentos. Por favor, tente novamente.';
+            clearTimeout(timeoutId);
+            return res.json({ correlation_id: envelope.correlation_id, final_message: errMsg, actions: [] });
+          }
+        }
+
+        // Resposta não reconhecida no CANCELLING com lista — reiterar
+        const reiterMsg = `Não entendi. Responda com o número do agendamento (1, 2...) ou *todos* para cancelar todos.`;
+        clearTimeout(timeoutId);
+        return res.json({ correlation_id: envelope.correlation_id, final_message: reiterMsg, actions: [] });
+      }
     }
 
     // ======================================================
@@ -5232,6 +5394,11 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
     clearTimeout(timeoutId);
     const errName = err?.name || 'UnknownError';
     const errMessage = err?.message || String(err);
+
+    // console.error garante visibilidade no Railway (pino-pretty usa worker thread)
+    console.error(`[PROCESS_ERROR] ${errName}: ${errMessage}`);
+    console.error(`[PROCESS_ERROR] stack: ${err?.stack || 'N/A'}`);
+    console.error(`[PROCESS_ERROR] from=${envelope?.from} clinic=${envelope?.clinic_id} msg="${(envelope?.message_text || '').substring(0, 80)}"`);
 
     log.error(
       {
