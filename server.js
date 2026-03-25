@@ -2801,32 +2801,37 @@ if (envelope.intent_override) {
 // a conversa, evitando loop de respostas desnecessárias.
 // DEVE ser verificado ANTES do interceptor de agendamento.
 // ======================================================
-const ENCERRAMENTO_PATTERNS = [
-  // Recusas diretas
+// Padrões DEFINITIVOS — encerram sempre, mesmo durante booking ativo
+const ENCERRAMENTO_DEFINITIVO = [
   /^n[aã]o\s*(obrigad[ao]|,?\s*obrigad[ao])?$/i,
   /^n[aã]o\s*(preciso|quero|desejo|necessito)/i,
   /^n[aã]o\s*,?\s*(vlw|valeu|brigad[ao])/i,
-  // Agradecimentos de encerramento
   /^(obrigad[ao]|brigad[ao]|vlw|valeu)\s*(!|\.)*$/i,
   /^(muito\s+)?obrigad[ao]/i,
   /^(agradec|thanks|thank)/i,
-  // Despedidas (saudações de horário SOZINHAS não encerram — são saudações)
-  // "bom dia", "boa tarde", "boa noite" sozinhos = saudação, não encerramento
   /^(tchau|ate\s*(logo|mais|breve)|bye|flw|falou|fui)/i,
-  // Encerramento implícito
+  /^nada\s*(mais|n[aã]o)?$/i,
+  /^(por\s*enquanto\s*)?[eé]\s*s[oó]$/i,
+];
+
+// Padrões AMBÍGUOS — "ok", "beleza", "entendi" são confirmações durante booking ativo;
+// só encerram quando NÃO há fluxo em andamento (booking_state = idle)
+const ENCERRAMENTO_AMBIGUO = [
   /^(s[oó]\s*(isso|era\s*isso)|era\s*s[oó]\s*isso|t[aá]\s*(bom|certo|ok))/i,
   /^(ok|beleza|blz|suave|tranquilo|perfeito)\s*(!|\.)*$/i,
   /^(entendi|entendido|certo)\s*(!|\.)*$/i,
-  /^nada\s*(mais|n[aã]o)?$/i,
-  /^(por\s*enquanto\s*)?[eé]\s*s[oó]$/i,
 ];
 
 const normalizedMsgEncerramento = envelope.message_text.trim().toLowerCase()
   .replace(/[!?.]+$/g, '').trim();
 
-const isEncerramento = ENCERRAMENTO_PATTERNS.some(
-  pattern => pattern.test(normalizedMsgEncerramento)
-);
+const _bookingAtivo = conversationState?.booking_state &&
+  conversationState.booking_state !== BOOKING_STATES.IDLE &&
+  conversationState.booking_state !== BOOKING_STATES.BOOKED;
+
+const isEncerramento =
+  ENCERRAMENTO_DEFINITIVO.some(p => p.test(normalizedMsgEncerramento)) ||
+  (!_bookingAtivo && ENCERRAMENTO_AMBIGUO.some(p => p.test(normalizedMsgEncerramento)));
 
 if (isEncerramento) {
   console.log(`[INTERCEPTOR_ENCERRAMENTO] Encerramento detectado: "${normalizedMsgEncerramento}" | booking_state: ${conversationState?.booking_state || 'idle'}`);
@@ -2868,6 +2873,43 @@ if (isEncerramento) {
     actions: [],
     debug: DEBUG ? { intercepted: true, type: 'encerramento', booking_reset: shouldResetBooking } : undefined,
   });
+}
+
+// ======================================================
+// AWAITING_SLOTS + AFIRMAÇÃO: quando o bot disse "vou buscar horários"
+// e o usuário responde "ok"/"beleza"/"certo" etc., buscar datas diretamente
+// sem passar pelo LLM (que às vezes extrai 'other' para mensagens curtas).
+// ======================================================
+if (conversationState?.booking_state === BOOKING_STATES.AWAITING_SLOTS &&
+    _AFIRMACAO_RE.test(envelope.message_text.trim())) {
+  const _awDoctorId = conversationState.doctor_id;
+  console.log(`[AWAITING_SLOTS_AFFIRM] afirmação '${envelope.message_text}' durante AWAITING_SLOTS → buscando datas para doctor_id=${_awDoctorId}`);
+  try {
+    const _awResult = await executeSchedulingTool(
+      'buscar_proximas_datas',
+      { doctor_id: _awDoctorId, dias: 14 },
+      { clinicId: envelope.clinic_id, userPhone: envelope.from }
+    );
+    if (_awResult?.success && _awResult?.available_dates?.length > 0) {
+      const _awDates = _awResult.available_dates.slice(0, 5);
+      const _awLines = _awDates.map((d, i) => `${i + 1}) ${d.day_of_week}, ${d.formatted_date}`).join('\n');
+      const _awMsg = `Aqui estão os próximos horários disponíveis para *${conversationState.doctor_name}*:\n\n${_awLines}\n\nQual data prefere?`;
+      await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
+        booking_state: BOOKING_STATES.COLLECTING_DATE,
+        last_suggested_dates: _awDates,
+      });
+      await saveConversationTurn({
+        clinicId: envelope.clinic_id, fromNumber: envelope.from,
+        correlationId: envelope.correlation_id, userText: envelope.message_text,
+        assistantText: _awMsg, intentGroup: 'scheduling', intent: 'continue_booking', slots: null,
+      });
+      clearTimeout(timeoutId);
+      return res.json({ correlation_id: envelope.correlation_id, final_message: _awMsg, actions: [] });
+    }
+  } catch (_awErr) {
+    console.error('[AWAITING_SLOTS_AFFIRM] Erro ao buscar datas:', _awErr.message);
+  }
+  // se falhar, cai para o fluxo normal
 }
 
 // ======================================================
@@ -2966,7 +3008,40 @@ if (messageHasInfoQuestion) {
       console.log(`[INFO][3/5] fonte=doctor_services | rows=${dsRows?.length || 0} | preço_montado=${!!priceAnswer}`);
     } catch (e) { console.error(`[INFO][ERROR] doctor_services fetch: ${e.message}`); }
   } else {
-    console.log(`[INFO][3/5] fonte=doctor_services | skipped (sem médico identificado) — indo para KB`);
+    console.log(`[INFO][3/5] fonte=doctor_services | skipped (sem médico identificado)`);
+
+    // ── STEP 2.5: Pergunta de preço sem médico → listar todos os preços da clínica ──
+    // Evita cair no KB que retorna info de convênio quando o paciente quer saber valores.
+    const _normMsgPrice = envelope.message_text.toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '');
+    const _isPriceOnly = /\b(valor|valores|preco|precos|custa|custo|vale|cobram?|cobranca)\b/.test(_normMsgPrice);
+    const _hasInsurance = /\b(convenio|plano|cartao|pix|pagamento|parcela|unimed|bradesco|amil)\b/.test(_normMsgPrice);
+    if (_isPriceOnly && !_hasInsurance) {
+      try {
+        const { data: _allSvcs } = await supabase
+          .from('doctor_services')
+          .select('service_name, price, doctors(name, specialty)')
+          .eq('clinic_id', envelope.clinic_id)
+          .eq('active', true)
+          .order('service_name');
+        const _validSvcs = (_allSvcs || []).filter(s => s.price && s.doctors?.name);
+        if (_validSvcs.length > 0) {
+          const _lines = _validSvcs.map(s =>
+            `• *${s.doctors.name}* — ${s.service_name}: R$ ${Number(s.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+          ).join('\n');
+          const _allPricesMsg = `Aqui estão os valores de consulta:\n\n${_lines}\n\nQual médico você gostaria de agendar? 😊`;
+          console.log(`[INFO][2.5/5] fonte=all_doctor_services | ${_validSvcs.length} serviços listados`);
+          _logFinalMsg('all_doctor_services', _allPricesMsg);
+          await saveConversationTurn({
+            clinicId: envelope.clinic_id, fromNumber: envelope.from,
+            correlationId: envelope.correlation_id, userText: envelope.message_text,
+            assistantText: _allPricesMsg, intentGroup: 'other', intent: 'info_all_prices', slots: null,
+          });
+          clearTimeout(timeoutId);
+          return res.json({ correlation_id: envelope.correlation_id, final_message: _allPricesMsg, actions: [] });
+        }
+      } catch (_e2) { console.error('[INFO][2.5/5] Erro ao listar preços:', _e2.message); }
+    }
   }
 
   // ── STEP 3: Se há preço → responder DIRETAMENTE, sem KB ─────────────────
@@ -3682,6 +3757,25 @@ if (updatedState.doctor_id && !activeConvState.doctor_id &&
 }
 
 console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
+
+    // ======================================================
+    // AFFIRMATION OVERRIDE: "ok", "beleza", "certo", "pode ser" etc.
+    // durante booking ativo → forçar intent_group='scheduling' antes do FIX3.
+    // Sem isto o LLM às vezes extrai 'other' para afirmações curtas,
+    // o que dispara o FIX3 e encerra o fluxo incorretamente.
+    // ======================================================
+    const _AFIRMACAO_RE = /^(ok|beleza|blz|certo|pode|pode ser|isso|ótimo|otimo|claro|combinado|tá|ta|tudo bem)\s*(!|\.|\s)*$/i;
+    const _isAfirmacao  = _AFIRMACAO_RE.test(envelope.message_text.trim());
+    const _isActiveBookingNow = [
+      BOOKING_STATES.COLLECTING_SPECIALTY, BOOKING_STATES.COLLECTING_DOCTOR,
+      BOOKING_STATES.COLLECTING_DATE,      BOOKING_STATES.AWAITING_SLOTS,
+      BOOKING_STATES.COLLECTING_TIME,      BOOKING_STATES.CONFIRMING,
+    ].includes(conversationState?.booking_state);
+    if (_isAfirmacao && _isActiveBookingNow && extracted?.intent_group === 'other') {
+      console.log(`[AFFIRMATION_OVERRIDE] '${envelope.message_text}' reclassificado: other→scheduling/continue_booking (booking_state=${conversationState?.booking_state})`);
+      extracted.intent_group = 'scheduling';
+      extracted.intent       = 'continue_booking';
+    }
 
     // ======================================================
     // 7) CONFIDENCE GUARD + TAREFA 2 FIX 3: PRESERVAÇÃO DE ESTADO
