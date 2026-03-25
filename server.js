@@ -2648,7 +2648,7 @@ if (envelope.intent_override) {
       let viewMsg;
       if (appointments?.success && appointments?.appointments?.length > 0) {
         const list = appointments.appointments.map(a => 
-          `📅 ${a.date || a.appointment_date} às ${a.time || a.start_time} — ${a.doctor_name || 'Médico'} (${a.status || 'agendado'})`
+          `📅 ${a.date || a.appointment_date} às ${a.time || a.start_time} — *${a.doctors?.name || a.doctor_name || 'Médico'}* (${a.status || 'agendado'})`
         ).join('\n');
         viewMsg = `Seus agendamentos:\n\n${list}\n\nDeseja remarcar, cancelar ou agendar uma nova consulta?`;
       } else {
@@ -3162,7 +3162,7 @@ if (intentoDireto) {
       let viewMsg;
       if (appointments?.success && appointments?.appointments?.length > 0) {
         const list = appointments.appointments.map(a => 
-          `📅 ${a.date || a.appointment_date} às ${a.time || a.start_time} — ${a.doctor_name || 'Médico'} (${a.status || 'agendado'})`
+          `📅 ${a.date || a.appointment_date} às ${a.time || a.start_time} — *${a.doctors?.name || a.doctor_name || 'Médico'}* (${a.status || 'agendado'})`
         ).join('\n');
         viewMsg = `Seus agendamentos:\n\n${list}\n\nDeseja remarcar, cancelar ou agendar uma nova consulta?`;
       } else {
