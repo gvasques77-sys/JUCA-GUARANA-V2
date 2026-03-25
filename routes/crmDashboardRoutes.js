@@ -748,7 +748,8 @@ export function createCrmApiRouter(supabase) {
         return res.status(400).json({ error: 'Não é possível cancelar agendamento já finalizado' });
       }
 
-      const { error: updateErr } = await supabase
+      // Tentar com colunas opcionais (cancellation_reason, cancelled_by podem não existir no schema)
+      let { error: updateErr } = await supabase
         .from('appointments')
         .update({
           status: 'cancelled',
@@ -756,7 +757,19 @@ export function createCrmApiRouter(supabase) {
           cancelled_by: 'dashboard',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', appointmentId);
+        .eq('id', appointmentId)
+        .eq('clinic_id', req.clinicId);
+
+      // Se falhou por coluna inexistente, tentar só com status
+      if (updateErr && (updateErr.code === '42703' || (updateErr.message || '').includes('column'))) {
+        console.warn('[CRM-API] Colunas cancellation_reason/cancelled_by ausentes, usando fallback:', updateErr.message);
+        const fallback = await supabase
+          .from('appointments')
+          .update({ status: 'cancelled' })
+          .eq('id', appointmentId)
+          .eq('clinic_id', req.clinicId);
+        updateErr = fallback.error;
+      }
 
       if (updateErr) {
         console.error('[CRM-API] Erro ao cancelar:', updateErr.message);

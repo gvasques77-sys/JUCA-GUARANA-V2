@@ -164,19 +164,56 @@ function MC(p){var cs={blue:'#6E9FFF',emerald:'#34D399',amber:'#FBBF24',rose:'#F
   return h('div',{className:'card fi',style:{padding:'20px 24px'}},h('div',{className:'kpi-label'},p.l),h('div',{className:'kpi-value',style:{color:c}},p.v),p.s?h('div',{style:{fontSize:11,color:'var(--t3)',marginTop:6}},p.s):null)}
 function Bg(p){var bg=p.color?p.color+'20':'rgba(110,159,255,.12)';return h('span',{className:'badge',style:{background:bg,color:p.color||'#6E9FFF'}},SL[p.stage]||p.stage||'\u2014')}
 
-// BUG-01 fix: ref pattern — sempre chama a versão mais recente de fn, sem stale closure
-function useRefresh(fn,ms){
+// BUG-01 fix: ref pattern — fn(false)=carga inicial/filtro, fn(true)=background poll
+// busKey: registra no bus de eventos para receber triggers do Supabase Realtime
+function useRefresh(fn,ms,busKey){
   var ref=ur(fn);
   ue(function(){ref.current=fn;});
-  ue(function(){ref.current();var iv=setInterval(function(){ref.current();},ms||15000);return function(){clearInterval(iv);};},[]);
+  ue(function(){
+    ref.current(false); // carga inicial — componente pode exibir spinner se quiser
+    var iv=setInterval(function(){ref.current(true);},ms||15000); // polls = background silencioso
+    if(busKey)busOn(busKey,function(){ref.current(true);}); // realtime → refresh imediato
+    return function(){clearInterval(iv);if(busKey)busOff(busKey);};
+  },[]);
 }
 
-/* === F9A: Chart.js utility + tema dark === */
+/* === Bus de eventos: realtime → refresh imediato de componentes === */
 var _chartInstances={};
+var _bus={};
+function busOn(k,fn){_bus[k]=fn;}
+function busOff(k){delete _bus[k];}
+function busEmit(k){try{if(_bus[k])_bus[k]();}catch(e){}}
+
+/* === SWR Cache: mostra dados em cache instantaneamente, busca fresh em background === */
+var _swr={};
+function swrGet(k){return _swr[k]!==undefined?_swr[k]:null;}
+function swrSet(k,v){_swr[k]=v;}
+// Compara dois valores — só atualiza state se realmente mudou (evita re-render desnecessário)
+function swrDiff(setter,newVal){
+  setter(function(old){
+    if(old===newVal)return old;
+    try{if(JSON.stringify(old)===JSON.stringify(newVal))return old;}catch(e){}
+    return newVal;
+  });
+}
+
+/* === F9A: Chart.js utility — update sem destroy (sem flicker nos gráficos) === */
 function renderChart(id,type,data,opts){
   var el=document.getElementById(id);if(!el)return;
-  if(_chartInstances[id]){_chartInstances[id].destroy();_chartInstances[id]=null}
-  var defs={responsive:true,maintainAspectRatio:false,animation:{duration:600,easing:'easeOutQuart'},
+  // UPDATE PATH: instância existe com mesmo tipo — só atualiza dados, sem recriar
+  if(_chartInstances[id]&&_chartInstances[id].config.type===type){
+    _chartInstances[id].data.labels=data.labels;
+    data.datasets.forEach(function(ds,i){
+      if(!_chartInstances[id].data.datasets[i])return;
+      _chartInstances[id].data.datasets[i].data=ds.data;
+      if(ds.backgroundColor!==undefined)_chartInstances[id].data.datasets[i].backgroundColor=ds.backgroundColor;
+    });
+    _chartInstances[id].update('none'); // sem animação — instantâneo
+    return;
+  }
+  // CREATE PATH: nova instância (primeira vez ou tipo diferente)
+  if(_chartInstances[id]){_chartInstances[id].destroy();_chartInstances[id]=null;}
+  var defs={responsive:true,maintainAspectRatio:false,animation:{duration:400,easing:'easeOutQuart'},
     plugins:{legend:{labels:{color:'rgba(255,255,255,.5)',font:{family:'Inter',size:11},padding:12,usePointStyle:true,pointStyle:'circle'},position:'bottom'},
       tooltip:{backgroundColor:'#111827',borderColor:'rgba(255,255,255,.1)',borderWidth:1,titleFont:{family:'Inter',weight:600},bodyFont:{family:'Inter'},padding:12,cornerRadius:10,displayColors:true}},
     scales:type==='doughnut'||type==='pie'?{}:{x:{grid:{color:'rgba(255,255,255,.04)',drawBorder:false},ticks:{color:'rgba(255,255,255,.35)',font:{family:'Inter',size:11}},border:{display:false}},
@@ -192,8 +229,16 @@ function T1(p){
   var _o=us(null),ov=_o[0],sO=_o[1];var _f=us([]),fn=_f[0],sF=_f[1];var _a=us(null),an=_a[0],sA=_a[1];var _l=us(true),ld=_l[0],sL=_l[1];
   var _churnExp=us(false),churnExpanded=_churnExp[0],sChurnExp=_churnExp[1];
   var isOwner=p.role==='owner';
-  function load(){Promise.all([q('/overview'),q('/funnel'),q('/analytics')]).then(function(r){sO(r[0]);sF(r[1]||[]);sA(r[2]);sL(false);})}
-  useRefresh(load,15000);
+  function load(){
+    var c=swrGet('overview');
+    if(c){sO(c.ov);sF(c.fn);sA(c.an);sL(false);} // cache → exibe imediato, sem spinner
+    Promise.all([q('/overview'),q('/funnel'),q('/analytics')]).then(function(r){
+      var nOv=r[0],nFn=r[1]||[],nAn=r[2];
+      swrSet('overview',{ov:nOv,fn:nFn,an:nAn});
+      swrDiff(sO,nOv);swrDiff(sF,nFn);swrDiff(sA,nAn);sL(false);
+    }).catch(function(){sL(false);});
+  }
+  useRefresh(load,15000,'overview');
 
   /* F9A: BUG-10 fix — dependency array com an e fn para não recriar em re-renders desnecessários */
   ue(function(){
@@ -345,17 +390,22 @@ function T2(p){
   var isOwner=p.role==='owner';
   // Debounce: aguarda 400ms de inatividade antes de disparar search
   ue(function(){var t=setTimeout(function(){sQ(qvRaw);},400);return function(){clearTimeout(t);};},[qvRaw]);
-  function load(){
-    sL(true);var par='&stage='+sf+(qv?'&search='+encodeURIComponent(qv):'')+(df!=='all'?'&doctor='+df:'');
+  var _mPts=ur(false);
+  function load(isBackground){
+    var ck='pts-'+sf+'-'+df+'-'+qv;
+    var c=swrGet(ck);
+    if(c){sP(c.pts);sT(c.tot);sS(c.stg);sD(c.dcs);sL(false);} // cache → sem spinner
+    else if(!isBackground){sL(true);}
+    var par='&stage='+sf+(qv?'&search='+encodeURIComponent(qv):'')+(df!=='all'?'&doctor='+df:'');
     Promise.all([q('/patients?limit=50'+par),q('/stages'),q('/doctors')]).then(function(r){
-      var d=r[0]||{};sP(d.patients||[]);sT(d.total||0);sS(r[1]||[]);sD(r[2]||[]);sL(false);
-    });
+      var d=r[0]||{},nPts=d.patients||[],nTot=d.total||0,nStg=r[1]||[],nDcs=r[2]||[];
+      swrSet(ck,{pts:nPts,tot:nTot,stg:nStg,dcs:nDcs});
+      swrDiff(sP,nPts);swrDiff(sT,nTot);swrDiff(sS,nStg);swrDiff(sD,nDcs);sL(false);
+    }).catch(function(){sL(false);});
   }
-  // BUG-09 fix: remover ue([qv,sf,df]) que causava dupla carga no mount;
-  // useRefresh já chama load() imediatamente no mount E no filtro correto via ref.
-  // Para mudanças de filtro disparar imediatamente, usamos um ue separado só para filtros.
-  ue(function(){load();},[qv,sf,df]);
-  useRefresh(load,20000);
+  // mounted ref: evita duplo fetch — useRefresh já chama load no mount
+  ue(function(){if(!_mPts.current){_mPts.current=true;return;}load(false);},[qv,sf,df]);
+  useRefresh(load,20000,'patients');
   return h('div',{className:'fi'},
     h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:12}},
       h('h2',{style:{fontSize:22,fontWeight:700}},'Pacientes ',h('span',{style:{fontSize:14,color:'var(--t3)',fontWeight:400}},'('+tot+')')),
@@ -403,7 +453,7 @@ function PatientModal(p){
     q('/patients/'+p.pid).then(function(d){
       if(d){sD(d);sProf(d.profileExtra||{});if(d.lastReport)sRpt(d.lastReport)}
       sL(false);
-    });
+    }).catch(function(){sL(false);});
     loadTags();
   }
   function loadTags(){
@@ -413,10 +463,16 @@ function PatientModal(p){
   ue(function(){load()},[]);
 
   function addTag(tagId){
-    q('/patients/'+p.pid+'/tags',{method:'POST',body:JSON.stringify({tag_id:tagId})}).then(function(r){if(r&&r.success)loadTags()});
+    q('/patients/'+p.pid+'/tags',{method:'POST',body:JSON.stringify({tag_id:tagId})}).then(function(r){
+      if(r&&r.success)loadTags();
+      else if(r&&r.error)alert('Erro ao adicionar tag: '+r.error);
+    }).catch(function(){alert('Erro de conexão ao adicionar tag.');});
   }
   function removeTag(tagId){
-    q('/patients/'+p.pid+'/tags/'+tagId,{method:'DELETE'}).then(function(r){if(r&&r.success)loadTags()});
+    q('/patients/'+p.pid+'/tags/'+tagId,{method:'DELETE'}).then(function(r){
+      if(r&&r.success)loadTags();
+      else if(r&&r.error)alert('Erro ao remover tag: '+r.error);
+    }).catch(function(){alert('Erro de conexão ao remover tag.');});
   }
 
   function saveProfile(){
@@ -424,7 +480,8 @@ function PatientModal(p){
     q('/patients/'+p.pid+'/profile',{method:'PUT',body:JSON.stringify(prof)}).then(function(r){
       sSaving(false);
       if(r&&r.success)alert('Perfil salvo com sucesso!');
-    });
+      else alert('Erro ao salvar perfil: '+(r&&r.error||'tente novamente'));
+    }).catch(function(){sSaving(false);alert('Erro de conexão ao salvar perfil.');});
   }
 
   function genReport(){
@@ -432,7 +489,8 @@ function PatientModal(p){
     q('/patients/'+p.pid+'/report',{method:'POST'}).then(function(r){
       sGenRpt(false);
       if(r&&r.report)sRpt(r.report);
-    });
+      else alert('Erro ao gerar relatório: '+(r&&r.error||'tente novamente'));
+    }).catch(function(){sGenRpt(false);alert('Erro de conexão ao gerar relatório.');});
   }
 
   function pf(key,val){sProf(function(old){var n=Object.assign({},old);n[key]=val;return n})}
@@ -677,7 +735,7 @@ function PatientModal(p){
 /* ===== TELA 3: TIMELINE (standalone, mantida para compat) ===== */
 function T3(p){
   var _e=us([]),ev=_e[0],sE=_e[1];var _l=us(true),ld=_l[0],sL=_l[1];
-  function load(){q('/patients/'+p.pid+'/timeline').then(function(d){sE(d||[]);sL(false)})}
+  function load(){q('/patients/'+p.pid+'/timeline').then(function(d){swrDiff(sE,d||[]);sL(false)}).catch(function(){sL(false)})}
   useRefresh(load,15000);
   return h('div',{className:'fi'},
     h('div',{style:{display:'flex',alignItems:'center',gap:12,marginBottom:20}},
@@ -705,17 +763,25 @@ function T3(p){
 function T4(p){
   var _t=us([]),tk=_t[0],sT=_t[1];var _l=us(true),ld=_l[0],sL=_l[1];var _f=us('pending'),sf=_f[0],sF=_f[1];
   var _acting=us(null),acting=_acting[0],sActing=_acting[1];
-  function load(){sL(true);q('/tasks?status='+sf).then(function(d){sT(d||[]);sL(false)})}
-  ue(function(){load()},[sf]);useRefresh(load,15000);
+  var _mTsk=ur(false);
+  function load(isBackground){
+    var ck='tasks-'+sf;var c=swrGet(ck);
+    if(c){sT(c);sL(false);}else if(!isBackground){sL(true);}
+    q('/tasks?status='+sf).then(function(d){
+      var nTsk=d||[];swrSet(ck,nTsk);swrDiff(sT,nTsk);sL(false);
+    }).catch(function(){sL(false)});
+  }
+  ue(function(){if(!_mTsk.current){_mTsk.current=true;return;}load(false);},[sf]);
+  useRefresh(load,15000,'tasks');
 
   function completeTask(id){
     sActing(id);
-    q('/tasks/'+id+'/complete',{method:'PUT'}).then(function(r){sActing(null);if(r&&r.success)load()});
+    q('/tasks/'+id+'/complete',{method:'PUT'}).then(function(r){sActing(null);if(r&&r.success)load(true);else alert('Erro: '+(r&&r.error||'não foi possível concluir a tarefa'));}).catch(function(){sActing(null);alert('Erro de conexão.');});
   }
   function cancelTask(id){
     if(!confirm('Cancelar esta tarefa?'))return;
     sActing(id);
-    q('/tasks/'+id+'/cancel',{method:'PUT',body:JSON.stringify({reason:'Cancelada manualmente via dashboard'})}).then(function(r){sActing(null);if(r&&r.success)load()});
+    q('/tasks/'+id+'/cancel',{method:'PUT',body:JSON.stringify({reason:'Cancelada manualmente via dashboard'})}).then(function(r){sActing(null);if(r&&r.success)load(true);else alert('Erro: '+(r&&r.error||'não foi possível cancelar a tarefa'));}).catch(function(){sActing(null);alert('Erro de conexão.');});
   }
 
   return h('div',{className:'fi'},
@@ -765,8 +831,12 @@ function T5(){
   var _cx=us(null),cx=_cx[0],sCx=_cx[1]; // id do appt em ação
   var _conf=us(null),conf=_conf[0],sConf=_conf[1]; // {id, action} — confirmação inline
 
-  function load(){q('/agenda/today').then(function(d){sA(d||{today:[],upcoming:[]});sL(false);})}
-  useRefresh(load,15000);
+  function load(){
+    var c=swrGet('agenda');if(c){sA(c);sL(false);}
+    q('/agenda/today').then(function(d){
+      var nAg=d||{today:[],upcoming:[]};swrSet('agenda',nAg);swrDiff(sA,nAg);sL(false);
+    }).catch(function(){sL(false);});}
+  useRefresh(load,15000,'agenda');
 
   // ação genérica: attend | no-show | cancel
   function doAction(id,endpoint){
@@ -774,7 +844,7 @@ function T5(){
     q('/appointments/'+id+'/'+endpoint,{method:'POST',body:JSON.stringify({reason:'Via dashboard'})}).then(function(r){
       sCx(null);
       if(r&&r.success){load();}else{alert('Erro: '+(r&&r.error||'desconhecido'));}
-    });
+    }).catch(function(){sCx(null);alert('Erro de conexão. Tente novamente.');});
   }
 
   // Linha de agendamento reutilizável para hoje
@@ -853,8 +923,8 @@ function T5(){
 function T6(p){
   var _r=us(null),rpt=_r[0],sR=_r[1];var _l=us(true),ld=_l[0],sL=_l[1];var _g=us(false),gen=_g[0],sG=_g[1];
   var isOwner=p.role==='owner';
-  ue(function(){q('/reports/latest').then(function(d){sR(d&&d.report?d.report:null);sL(false)})},[]);
-  function doGen(){sG(true);q('/reports/generate',{method:'POST'}).then(function(d){if(d&&d.report)sR(d.report);else if(d&&d.error)alert('Erro: '+d.error);sG(false)})}
+  ue(function(){q('/reports/latest').then(function(d){sR(d&&d.report?d.report:null);sL(false)}).catch(function(){sL(false)})},[]);
+  function doGen(){sG(true);q('/reports/generate',{method:'POST'}).then(function(d){if(d&&d.report)sR(d.report);else alert('Erro: '+(d&&d.error||'não foi possível gerar o relatório'));sG(false)}).catch(function(){sG(false);alert('Erro de conexão ao gerar relatório.');})}
   function rTxt(t){if(!t)return null;return t.split('\n').map(function(l,i){if(l.indexOf('## ')===0)return h('h2',{key:i},l.slice(3));if(l.indexOf('### ')===0)return h('h3',{key:i},l.slice(4));if(l.indexOf('- ')===0)return h('li',{key:i},l.slice(2));if(l.trim()==='')return h('br',{key:i});return h('p',{key:i},l)})}
   return h('div',{className:'fi'},
     h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:12}},
@@ -901,19 +971,42 @@ function App(){
     });
   },[]);
 
-  // Load task summary for badge
+  // Load task summary for badge — atualiza via bus quando tasks mudam
   ue(function(){
     if(!ready)return;
     function loadTS(){q('/tasks/summary').then(function(d){if(d)sTS(d)})}
-    loadTS();var iv=setInterval(loadTS,15000);return function(){clearInterval(iv)};
+    loadTS();var iv=setInterval(loadTS,15000);
+    busOn('tasks-badge',loadTS);
+    return function(){clearInterval(iv);busOff('tasks-badge');};
   },[ready]);
 
-  // F9F: Load notifications
+  // F9F: Load notifications — atualiza via bus quando eventos CRM chegam
   ue(function(){
     if(!ready)return;
     function loadNotif(){q('/notifications').then(function(d){if(d)sNotif(d)})}
-    loadNotif();var iv2=setInterval(loadNotif,30000);return function(){clearInterval(iv2)};
+    loadNotif();var iv2=setInterval(loadNotif,30000);
+    busOn('notifications',loadNotif);
+    return function(){clearInterval(iv2);busOff('notifications');};
   },[ready]);
+
+  // Supabase Realtime: atualizações instantâneas sem polling
+  // Requer que as tabelas estejam na publication supabase_realtime no banco
+  ue(function(){
+    if(!ready||!user||!user.clinicId)return;
+    var cid=user.clinicId;
+    var ch=sbClient.channel('crm-rt-'+cid)
+      .on('postgres_changes',{event:'*',schema:'public',table:'appointments',filter:'clinic_id=eq.'+cid},
+        function(){busEmit('agenda');busEmit('overview');busEmit('notifications');})
+      .on('postgres_changes',{event:'*',schema:'public',table:'crm_tasks',filter:'clinic_id=eq.'+cid},
+        function(){busEmit('tasks');busEmit('tasks-badge');busEmit('overview');})
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'crm_events',filter:'clinic_id=eq.'+cid},
+        function(){busEmit('notifications');busEmit('overview');})
+      .subscribe(function(s){
+        if(s==='SUBSCRIBED')console.log('[RT] Realtime conectado — atualizações instantâneas ativas');
+        else if(s==='CHANNEL_ERROR'||s==='TIMED_OUT')console.warn('[RT] Realtime indisponível — polling ativo como fallback');
+      });
+    return function(){sbClient.removeChannel(ch);};
+  },[ready,user]);
 
   function onSel(id,nm){sModal({id:id,n:nm})}
   function onOpenPatient(id,nm){sModal({id:id,n:nm})}
