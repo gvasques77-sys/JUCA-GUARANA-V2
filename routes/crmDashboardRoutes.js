@@ -207,6 +207,9 @@ export function createCrmApiRouter(supabase) {
             .filter(a => !['cancelled', 'no_show'].includes(a.status))
             .reduce((sum, a) => sum + Number(a.price || 0), 0);
           const doctorIds = [...new Set(appts.map(a => a.doctor_id))];
+          const cancelledAppts = appts.filter(a => a.status === 'cancelled');
+          const totalCancelled = cancelledAppts.length;
+          const lastCancelledAt = cancelledAppts[0]?.appointment_date || null;
 
           const row = {
             ...p,
@@ -226,6 +229,8 @@ export function createCrmApiRouter(supabase) {
             patient_revenue: req.userRole === 'owner' ? revenue : undefined,
             doctor_ids: doctorIds,
             total_appointments_real: appts.length,
+            total_cancelled: totalCancelled,
+            last_cancelled_at: lastCancelledAt,
           };
           return row;
         });

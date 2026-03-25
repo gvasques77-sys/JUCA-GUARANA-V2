@@ -430,11 +430,13 @@ function T2(p){
           var daysSince=pt.last_contact_at?Math.floor((Date.now()-new Date(pt.last_contact_at).getTime())/86400000):999;
           var isVeryStale=daysSince>60;var isStale=daysSince>30;var isFresh=daysSince<7;
           var hasNS=(pt.total_no_shows||0)>0;
+          var hasCncl=(pt.total_cancelled||0)>0;
           var sc=pt.stage_color||'rgba(255,255,255,.15)';
-          var rowBg=isVeryStale?'rgba(244,63,94,.06)':hasNS?'rgba(245,158,11,.05)':'transparent';
+          // fundo: cancelado tem prioridade (rose forte), depois no-show (amber), depois inativo (rose fraco)
+          var rowBg=hasCncl?'rgba(244,63,94,.09)':hasNS?'rgba(245,158,11,.07)':isVeryStale?'rgba(244,63,94,.05)':'transparent';
           var contactColor=isVeryStale?'var(--rose)':isStale?'var(--amber)':isFresh?'var(--green)':'var(--t3)';
           return h('tr',{key:pt.patient_id,className:'trow',style:{cursor:'pointer',background:rowBg},onClick:function(){p.onSel(pt.patient_id,pt.patient_name)}},
-            h('td',{style:{borderLeft:'4px solid '+sc,paddingLeft:14}},
+            h('td',{style:{borderLeft:'4px solid '+(hasCncl?'var(--rose)':sc),paddingLeft:14}},
               h('div',{style:{fontWeight:600}},pt.patient_name),
               h('div',{style:{fontSize:12,color:'var(--t3)'}},pt.phone)
             ),
@@ -443,7 +445,8 @@ function T2(p){
             h('td',{style:{textAlign:'center'}},h('span',{className:'mono',style:{fontWeight:600,color:(pt.lead_score||0)>=60?'var(--green)':(pt.lead_score||0)>=30?'var(--amber)':'var(--t3)'}},pt.lead_score||0)),
             h('td',{style:{textAlign:'center'}},
               h('span',{className:'mono'},pt.total_appointments||0),
-              hasNS?h('span',{className:'badge',style:{background:'rgba(244,63,94,.15)',color:'var(--rose)',marginLeft:6,fontSize:10,fontWeight:700}},'\u26A0 '+pt.total_no_shows+' NS'):null
+              hasCncl?h('span',{className:'badge',style:{background:'rgba(244,63,94,.18)',color:'var(--rose)',marginLeft:6,fontSize:10,fontWeight:700}},'\u2715 '+pt.total_cancelled+' cancel.'):null,
+              hasNS?h('span',{className:'badge',style:{background:'rgba(245,158,11,.18)',color:'var(--amber)',marginLeft:4,fontSize:10,fontWeight:700}},'\u26A0 '+pt.total_no_shows+' NS'):null
             ),
             h('td',null,pt.next_appointment
               ?h('div',null,
