@@ -231,7 +231,7 @@ function T1(p){
   var isOwner=p.role==='owner';
   function load(){
     var c=swrGet('overview');
-    if(c){sO(c.ov);sF(c.fn);sA(c.an);sL(false);} // cache → exibe imediato, sem spinner
+    if(c){swrDiff(sO,c.ov);swrDiff(sF,c.fn);swrDiff(sA,c.an);sL(false);}
     Promise.all([q('/overview'),q('/funnel'),q('/analytics')]).then(function(r){
       var nOv=r[0],nFn=r[1]||[],nAn=r[2];
       swrSet('overview',{ov:nOv,fn:nFn,an:nAn});
@@ -239,6 +239,13 @@ function T1(p){
     }).catch(function(){sL(false);});
   }
   useRefresh(load,15000,'overview');
+  // keep-alive: resize gráficos ao ficar visível novamente (canvas pode ter sido criado com display:none)
+  ue(function(){
+    if(!p.visible)return;
+    ['chart-weekly','chart-funnel','chart-doctors'].forEach(function(id){
+      if(_chartInstances[id]){try{_chartInstances[id].resize();}catch(e){}}
+    });
+  },[p.visible]);
 
   /* F9A: BUG-10 fix — dependency array com an e fn para não recriar em re-renders desnecessários */
   ue(function(){
@@ -394,7 +401,7 @@ function T2(p){
   function load(isBackground){
     var ck='pts-'+sf+'-'+df+'-'+qv;
     var c=swrGet(ck);
-    if(c){sP(c.pts);sT(c.tot);sS(c.stg);sD(c.dcs);sL(false);} // cache → sem spinner
+    if(c){swrDiff(sP,c.pts);swrDiff(sT,c.tot);swrDiff(sS,c.stg);swrDiff(sD,c.dcs);sL(false);}
     else if(!isBackground){sL(true);}
     var par='&stage='+sf+(qv?'&search='+encodeURIComponent(qv):'')+(df!=='all'?'&doctor='+df:'');
     Promise.all([q('/patients?limit=50'+par),q('/stages'),q('/doctors')]).then(function(r){
@@ -766,7 +773,7 @@ function T4(p){
   var _mTsk=ur(false);
   function load(isBackground){
     var ck='tasks-'+sf;var c=swrGet(ck);
-    if(c){sT(c);sL(false);}else if(!isBackground){sL(true);}
+    if(c){swrDiff(sT,c);sL(false);}else if(!isBackground){sL(true);}
     q('/tasks?status='+sf).then(function(d){
       var nTsk=d||[];swrSet(ck,nTsk);swrDiff(sT,nTsk);sL(false);
     }).catch(function(){sL(false)});
@@ -832,7 +839,7 @@ function T5(){
   var _conf=us(null),conf=_conf[0],sConf=_conf[1]; // {id, action} — confirmação inline
 
   function load(){
-    var c=swrGet('agenda');if(c){sA(c);sL(false);}
+    var c=swrGet('agenda');if(c){swrDiff(sA,c);sL(false);}
     q('/agenda/today').then(function(d){
       var nAg=d||{today:[],upcoming:[]};swrSet('agenda',nAg);swrDiff(sA,nAg);sL(false);
     }).catch(function(){sL(false);});}
@@ -1008,8 +1015,8 @@ function App(){
     return function(){sbClient.removeChannel(ch);};
   },[ready,user]);
 
-  function onSel(id,nm){sModal({id:id,n:nm})}
-  function onOpenPatient(id,nm){sModal({id:id,n:nm})}
+  var onSel=uc(function(id,nm){sModal({id:id,n:nm})},[]);
+  var onOpenPatient=uc(function(id,nm){sModal({id:id,n:nm});},[]);
 
   if(!ready)return h('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh'}},h(Ld));
 
@@ -1035,16 +1042,6 @@ function App(){
     {id:'agenda',l:'Agenda',i:'\uD83D\uDCC5'},
     {id:'report',l:'Relat\u00f3rio',i:'\uD83D\uDCDD'}
   ];
-
-  function page(){
-    if(pg==='overview')return h(T1,{role:role,onOpenPatient:onOpenPatient});
-    if(pg==='patients')return h(T2,{onSel:onSel,role:role});
-    if(pg==='timeline'&&sel)return h(T3,{pid:sel.id,pn:sel.n,onBack:function(){sP('patients')}});
-    if(pg==='tasks')return h(T4,{taskSummary:taskSum,onOpenPatient:onOpenPatient,role:role});
-    if(pg==='agenda')return h(T5);
-    if(pg==='report')return h(T6,{role:role});
-    return h(T1,{role:role,onOpenPatient:onOpenPatient});
-  }
 
   return h('div',null,
     // Patient modal
@@ -1108,7 +1105,13 @@ function App(){
           h('div',{style:{padding:'12px 16px',borderTop:'1px solid var(--bdr)',fontSize:11,color:'var(--t3)',textAlign:'center'}},notif.total+' eventos nas \u00faltimas 24h')
         ):null,
 
-        page()
+        // keep-alive: todos os screens ficam montados, só o display muda — sem unmount/remount, sem .fi replay
+        h('div',{style:{display:pg==='overview'?'block':'none'}},h(T1,{role:role,onOpenPatient:onOpenPatient,visible:pg==='overview'})),
+        h('div',{style:{display:pg==='patients'?'block':'none'}},h(T2,{onSel:onSel,role:role})),
+        h('div',{style:{display:pg==='tasks'?'block':'none'}},h(T4,{taskSummary:taskSum,onOpenPatient:onOpenPatient,role:role})),
+        h('div',{style:{display:pg==='agenda'?'block':'none'}},h(T5)),
+        h('div',{style:{display:pg==='report'?'block':'none'}},h(T6,{role:role})),
+        pg==='timeline'&&sel?h(T3,{pid:sel.id,pn:sel.n,onBack:function(){sP('patients')}}):null
       )
     )
   );
