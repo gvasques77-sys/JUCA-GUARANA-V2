@@ -3343,6 +3343,46 @@ if (intentoDireto) {
     });
   }
 
+  // ── Handler 'info' durante collecting_specialty / collecting_doctor ──────
+  // Quando o usuário pergunta "qual especialidade", "quais médicos" etc.
+  // no meio do fluxo de agendamento, mostrar a lista de médicos ativos.
+  // Sem este handler, cai em intent_group='other' → FIX3 bloqueia.
+  if (intentoDireto === 'info' &&
+      (conversationState?.booking_state === BOOKING_STATES.COLLECTING_SPECIALTY ||
+       conversationState?.booking_state === BOOKING_STATES.COLLECTING_DOCTOR ||
+       conversationState?.booking_state === BOOKING_STATES.IDLE)) {
+    try {
+      const { data: docList } = await supabase
+        .from('doctors')
+        .select('name, specialty')
+        .eq('clinic_id', envelope.clinic_id)
+        .eq('active', true)
+        .order('name');
+      let infoDirectMsg;
+      if (docList && docList.length > 0) {
+        const lines = docList.map(d => `• *${d.name}* — ${d.specialty || 'Geral'}`).join('\n');
+        infoDirectMsg = `Nossos médicos disponíveis:\n\n${lines}\n\nCom qual deles você gostaria de agendar?`;
+      } else {
+        infoDirectMsg = 'No momento não tenho a lista de médicos disponíveis. Pode me dizer o nome do médico ou especialidade que deseja?';
+      }
+      await saveConversationTurn({
+        clinicId: envelope.clinic_id, fromNumber: envelope.from,
+        correlationId: envelope.correlation_id, userText: envelope.message_text,
+        assistantText: infoDirectMsg, intentGroup: 'other', intent: 'info_doctors_list', slots: null,
+      });
+      clearTimeout(timeoutId);
+      return res.json({
+        correlation_id: envelope.correlation_id,
+        final_message: infoDirectMsg,
+        actions: [],
+        debug: DEBUG ? { source: 'info_doctors_list' } : undefined,
+      });
+    } catch (e) {
+      console.error('[INFO_DOCTORS_LIST] Erro:', e.message);
+      // se falhar, deixa cair para o LLM
+    }
+  }
+
   extracted = {
     intent_group: intentoDireto === 'cancel' ? 'scheduling' : (intentoDireto === 'info' ? 'other' : 'scheduling'),
     intent: intentoDireto,
