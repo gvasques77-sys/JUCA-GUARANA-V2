@@ -2388,13 +2388,7 @@ if (previousMessages.length === 0) {
       const { rawDate: _rawDate2, displayDate: _displayDate2, rawTime: _rawTime2 } =
         _auditarEstadoBooked('BOOKED_GUARD', csB, envelope.from, _tzG);
 
-      const bookedWelcomeMsg =
-        `Olá! Seu agendamento está confirmado ✅\n\n` +
-        `👤 Paciente: ${csB.patient_name || 'Você'}\n` +
-        `👨‍⚕️ Médico: ${csB.doctor_name || '—'}\n` +
-        `📅 Data: ${_displayDate2 || '—'}\n` +
-        `🕐 Horário: ${_rawTime2 || '—'}\n\n` +
-        `Como posso te ajudar?`;
+      const bookedWelcomeMsg = `Que bom que você voltou! 😊 Em que posso te ajudar?`;
 
       // Divergência: verificar que a mensagem final reflete exatamente o estado
       if (csB.doctor_name && !bookedWelcomeMsg.includes(csB.doctor_name)) {
@@ -2977,7 +2971,11 @@ if (messageHasInfoQuestion) {
 
   // ── STEP 3: Se há preço → responder DIRETAMENTE, sem KB ─────────────────
   if (priceAnswer) {
-    const finalPriceMsg = `${priceAnswer}\n\nSe for por convênio, posso verificar a cobertura também. Deseja agendar? 😊`;
+    // Durante CONFIRMING: não perguntar "Deseja agendar?" — o agendamento já está pendente
+    const isConfirming = bookingStateNow === BOOKING_STATES.CONFIRMING;
+    const finalPriceMsg = isConfirming
+      ? `${priceAnswer}\n\nSe tiver mais dúvidas, pode perguntar. Quando quiser confirmar o agendamento, responda *sim*. 😊`
+      : `${priceAnswer}\n\nSe for por convênio, posso verificar a cobertura também. Deseja agendar? 😊`;
     _logFinalMsg('doctor_services', finalPriceMsg);
     await saveConversationTurn({
       clinicId: envelope.clinic_id, fromNumber: envelope.from,
@@ -2988,7 +2986,7 @@ if (messageHasInfoQuestion) {
     return res.json({
       correlation_id: envelope.correlation_id,
       final_message: finalPriceMsg,
-      actions: [{
+      actions: isConfirming ? [] : [{
         type: 'send_interactive_buttons',
         payload: { buttons: [
           { id: 'schedule_new', title: '📅 Agendar consulta' },
@@ -3024,7 +3022,9 @@ if (messageHasInfoQuestion) {
 
   if (kbAnswer) {
     let finalKbMsg = kbAnswer;
-    if (alsoWantsToSchedule)   finalKbMsg += '\n\n---\nGostaria de agendar uma consulta? 😊';
+    if (bookingStateNow === BOOKING_STATES.CONFIRMING)
+                               finalKbMsg += '\n\n---\nSe tiver mais dúvidas, pode perguntar. Quando quiser confirmar o agendamento, responda *sim*. 😊';
+    else if (alsoWantsToSchedule) finalKbMsg += '\n\n---\nGostaria de agendar uma consulta? 😊';
     else if (isInActiveBooking) finalKbMsg += '\n\n---\nPosso continuar seu agendamento quando quiser 😊';
 
     _logFinalMsg('clinic_kb', finalKbMsg);
