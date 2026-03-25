@@ -1,348 +1,358 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>Juca Guaraná — Acesso ao Painel</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <style>
-    :root {
-      --blue:#3B82F6; --blue2:#60A5FA; --blue3:#1D4ED8;
-      --cyan:#06B6D4; --violet:#818CF8;
-      --bg:#050D1A; --card:rgba(8,22,48,.9);
-      --bdr:rgba(59,130,246,.18); --bdr2:rgba(59,130,246,.32);
-      --t1:#EEF4FF; --t2:rgba(188,213,255,.72); --t3:rgba(148,183,255,.42);
-      --rose:#F43F5E; --green:#34D399;
+    :root{
       --ease:cubic-bezier(.16,1,.3,1);
+      --t1:#EEF4FF; --t2:rgba(188,213,255,.78); --t3:rgba(148,183,255,.48);
+      --rose:#F43F5E; --green:#34D399; --blue:#3B82F6;
     }
     *{margin:0;padding:0;box-sizing:border-box}
 
-    body {
+    /* ── Page ── */
+    html,body{height:100%}
+    body{
       font-family:'Inter',sans-serif;
-      background:var(--bg);
+      background:#040e1c;
       min-height:100vh;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      overflow:hidden;
-      position:relative;
+      display:grid;
+      place-items:center;
+      padding:20px;
     }
 
-    /* ── Background canvas ── */
-    .bg-orb {
-      position:fixed;
-      border-radius:50%;
-      pointer-events:none;
-      filter:blur(90px);
-    }
-    .o1{width:600px;height:600px;top:-140px;left:-140px;
-        background:radial-gradient(circle,rgba(59,130,246,.22) 0%,transparent 70%);
-        animation:drift1 16s ease-in-out infinite alternate;}
-    .o2{width:500px;height:500px;bottom:-120px;right:-120px;
-        background:radial-gradient(circle,rgba(6,182,212,.18) 0%,transparent 70%);
-        animation:drift2 20s ease-in-out infinite alternate;}
-    .o3{width:380px;height:380px;top:42%;left:55%;
-        background:radial-gradient(circle,rgba(129,140,248,.12) 0%,transparent 70%);
-        animation:drift1 12s ease-in-out infinite alternate-reverse;}
-
-    @keyframes drift1{0%{transform:translate(0,0) scale(1)}100%{transform:translate(28px,-22px) scale(1.06)}}
-    @keyframes drift2{0%{transform:translate(0,0) scale(1)}100%{transform:translate(-24px,18px) scale(1.08)}}
-
-    /* Grid lines */
-    .bg-grid {
-      position:fixed;inset:0;pointer-events:none;
-      background-image:
-        linear-gradient(rgba(59,130,246,.05) 1px, transparent 1px),
-        linear-gradient(90deg,rgba(59,130,246,.05) 1px, transparent 1px);
-      background-size:64px 64px;
+    /* ── Fixed background ── */
+    .bg-fx{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:0}
+    .orb{position:absolute;border-radius:50%;filter:blur(100px)}
+    .orb1{width:650px;height:650px;top:-180px;left:-180px;
+          background:radial-gradient(circle,rgba(37,99,235,.28) 0%,transparent 68%);
+          animation:od1 18s ease-in-out infinite alternate}
+    .orb2{width:550px;height:550px;bottom:-150px;right:-150px;
+          background:radial-gradient(circle,rgba(6,182,212,.2) 0%,transparent 68%);
+          animation:od2 22s ease-in-out infinite alternate}
+    .orb3{width:350px;height:350px;top:35%;left:45%;
+          background:radial-gradient(circle,rgba(99,102,241,.14) 0%,transparent 68%);
+          animation:od1 14s ease-in-out infinite alternate-reverse}
+    @keyframes od1{0%{transform:translate(0,0)}100%{transform:translate(30px,-24px)}}
+    @keyframes od2{0%{transform:translate(0,0)}100%{transform:translate(-26px,20px)}}
+    .bg-grid{
+      position:absolute;inset:0;
+      background-image:linear-gradient(rgba(59,130,246,.045) 1px,transparent 1px),
+                       linear-gradient(90deg,rgba(59,130,246,.045) 1px,transparent 1px);
+      background-size:60px 60px;
     }
 
-    /* Floating medical cross decorations */
-    .deco-cross {
-      position:fixed;pointer-events:none;opacity:.04;
-    }
-    .deco-cross svg{display:block;}
-
-    /* ── Login card ── */
-    .login-wrap {
-      width:100%;max-width:430px;padding:20px;
+    /* ── Split card ── */
+    .card-outer{
       position:relative;z-index:10;
-      animation:card-in .8s var(--ease) both;
+      width:100%;max-width:880px;
+      display:flex;
+      border-radius:28px;
+      overflow:hidden;
+      box-shadow:0 40px 100px rgba(0,0,0,.65),0 0 0 1px rgba(59,130,246,.1);
+      animation:rise .75s var(--ease) both;
     }
-    @keyframes card-in{
-      from{opacity:0;transform:translateY(36px) scale(.97)}
-      to{opacity:1;transform:translateY(0) scale(1)}
+    @keyframes rise{from{opacity:0;transform:translateY(40px) scale(.97)}to{opacity:1;transform:none}}
+
+    /* ── Left brand panel ── */
+    .panel-left{
+      flex:0 0 42%;
+      background:linear-gradient(155deg,#0c2461 0%,#1a3a8f 35%,#0d5fa0 65%,#0891b2 100%);
+      padding:52px 40px;
+      display:flex;flex-direction:column;justify-content:space-between;
+      position:relative;overflow:hidden;
+    }
+    /* decorative circles inside left panel */
+    .panel-left::before{
+      content:'';position:absolute;width:320px;height:320px;
+      border-radius:50%;border:1px solid rgba(255,255,255,.07);
+      top:-80px;right:-100px;
+    }
+    .panel-left::after{
+      content:'';position:absolute;width:200px;height:200px;
+      border-radius:50%;border:1px solid rgba(255,255,255,.05);
+      bottom:-60px;left:-50px;
     }
 
-    .login-card {
-      background:var(--card);
-      border:1px solid var(--bdr);
-      border-radius:26px;
-      padding:48px 40px 40px;
-      text-align:center;
-      backdrop-filter:blur(32px);
-      -webkit-backdrop-filter:blur(32px);
-      box-shadow:
-        0 32px 80px rgba(0,0,0,.55),
-        0 0 0 1px rgba(59,130,246,.06),
-        inset 0 1px 0 rgba(255,255,255,.06);
+    .brand-top{position:relative;z-index:1}
+    .brand-icon{
+      width:64px;height:64px;
+      background:rgba(255,255,255,.15);
+      border:1.5px solid rgba(255,255,255,.22);
+      border-radius:20px;
+      display:flex;align-items:center;justify-content:center;
+      margin-bottom:22px;
+      backdrop-filter:blur(8px);
+      box-shadow:0 8px 28px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.2);
+      animation:icon-glow 3.5s ease-in-out infinite;
+    }
+    @keyframes icon-glow{
+      0%,100%{box-shadow:0 8px 28px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.2)}
+      50%{box-shadow:0 8px 40px rgba(0,0,0,.3),0 0 28px rgba(255,255,255,.1),inset 0 1px 0 rgba(255,255,255,.25)}
+    }
+    .brand-name{
+      font-size:26px;font-weight:800;color:#fff;
+      letter-spacing:-.025em;line-height:1.15;
+      margin-bottom:8px;
+    }
+    .brand-sub{
+      font-size:12px;font-weight:500;
+      color:rgba(255,255,255,.6);
+      letter-spacing:.05em;text-transform:uppercase;
+      margin-bottom:32px;
     }
 
-    /* ── Logo area ── */
-    .logo-area { margin-bottom:36px; }
-
-    .logo-icon-wrap {
-      display:inline-flex;
-      align-items:center;justify-content:center;
-      width:72px;height:72px;
-      background:linear-gradient(135deg,#2563EB 0%,#0891B2 100%);
-      border-radius:22px;
-      margin-bottom:18px;
-      box-shadow:0 8px 32px rgba(37,99,235,.5), 0 0 0 10px rgba(59,130,246,.1);
-      animation:icon-pulse 3.5s ease-in-out infinite;
-      position:relative;
-    }
-    @keyframes icon-pulse{
-      0%,100%{box-shadow:0 8px 32px rgba(37,99,235,.5),0 0 0 10px rgba(59,130,246,.1)}
-      50%{box-shadow:0 8px 44px rgba(37,99,235,.7),0 0 0 14px rgba(59,130,246,.14)}
-    }
-
-    /* Heartbeat line under icon */
-    .hb-line {
-      display:block;margin:0 auto 14px;
-      animation:hb-draw 2s linear infinite;
-      overflow:visible;
-    }
-    @keyframes hb-draw{
-      0%{stroke-dashoffset:200}
-      60%,100%{stroke-dashoffset:0}
-    }
+    /* Heartbeat SVG */
+    .hb-svg{display:block;width:100%;margin-bottom:28px;overflow:visible}
     .hb-path{
-      stroke-dasharray:200;
-      stroke-dashoffset:0;
-      animation:hb-anim 2.2s ease-in-out infinite;
+      stroke-dasharray:240;stroke-dashoffset:240;
+      animation:hb 2.4s ease-in-out infinite;
     }
-    @keyframes hb-anim{
-      0%,100%{opacity:.45}
-      40%{opacity:1}
-      80%{opacity:.45}
-    }
-
-    .logo-name {
-      font-size:24px;font-weight:800;letter-spacing:-.03em;
-      background:linear-gradient(135deg,#EEF4FF 0%,#93C5FD 50%,#67E8F9 100%);
-      -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-      background-clip:text;
-      margin-bottom:5px;
-    }
-    .logo-tag {
-      font-size:10.5px;font-weight:600;color:var(--t3);
-      letter-spacing:.14em;text-transform:uppercase;
+    @keyframes hb{
+      0%{stroke-dashoffset:240;opacity:.5}
+      50%{stroke-dashoffset:0;opacity:1}
+      80%,100%{stroke-dashoffset:0;opacity:.5}
     }
 
-    /* ── Form ── */
-    .form-group { margin-bottom:18px;text-align:left; }
+    /* Feature list */
+    .features{display:flex;flex-direction:column;gap:12px;position:relative;z-index:1}
+    .feat{
+      display:flex;align-items:center;gap:12px;
+      padding:12px 14px;
+      background:rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.1);
+      border-radius:12px;
+      backdrop-filter:blur(6px);
+      animation:feat-in .6s var(--ease) both;
+    }
+    .feat:nth-child(1){animation-delay:.15s}
+    .feat:nth-child(2){animation-delay:.25s}
+    .feat:nth-child(3){animation-delay:.35s}
+    @keyframes feat-in{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}
+    .feat-icon{
+      width:34px;height:34px;border-radius:9px;
+      display:flex;align-items:center;justify-content:center;
+      flex-shrink:0;font-size:16px;
+      background:rgba(255,255,255,.12);
+    }
+    .feat-text{font-size:13px;color:rgba(255,255,255,.88);font-weight:500;line-height:1.35}
+    .feat-text span{display:block;font-size:11px;color:rgba(255,255,255,.5);font-weight:400;margin-top:1px}
 
-    .form-label {
+    .brand-bottom{
+      font-size:11px;color:rgba(255,255,255,.38);
+      text-align:center;position:relative;z-index:1;
+    }
+
+    /* ── Right form panel ── */
+    .panel-right{
+      flex:1;
+      background:linear-gradient(155deg,#071628 0%,#0a1e38 100%);
+      padding:52px 44px;
+      display:flex;flex-direction:column;justify-content:center;
+    }
+
+    .form-title{
+      font-size:22px;font-weight:800;color:var(--t1);
+      letter-spacing:-.025em;margin-bottom:6px;
+    }
+    .form-desc{font-size:13px;color:var(--t3);margin-bottom:32px;line-height:1.5}
+
+    /* Error */
+    .error-msg{
+      background:rgba(244,63,94,.09);
+      border:1px solid rgba(244,63,94,.24);
+      color:#FCA5A5;
+      padding:12px 16px;border-radius:11px;
+      font-size:13px;margin-bottom:20px;
+      display:none;
+      animation:shake .32s cubic-bezier(.36,.07,.19,.97) both;
+    }
+    @keyframes shake{
+      0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)}
+      40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(4px)}
+    }
+
+    /* Form groups */
+    .fg{margin-bottom:18px}
+    .fg label{
       display:block;font-size:11px;font-weight:700;
-      color:var(--t2);margin-bottom:8px;
+      color:var(--t3);margin-bottom:8px;
       letter-spacing:.07em;text-transform:uppercase;
     }
-
-    .input-wrap { position:relative; }
-
-    .input-icon {
-      position:absolute;left:14px;top:50%;
-      transform:translateY(-50%);
-      width:17px;height:17px;
-      color:var(--t3);pointer-events:none;
+    .iw{position:relative}
+    .iicon{
+      position:absolute;left:14px;top:50%;transform:translateY(-50%);
+      width:16px;height:16px;color:var(--t3);pointer-events:none;
       transition:color .2s;
     }
-    .input-wrap:focus-within .input-icon { color:var(--blue2); }
-
-    .form-input {
+    .iw:focus-within .iicon{color:#60A5FA}
+    .finput{
       width:100%;
-      background:rgba(255,255,255,.04);
+      background:rgba(255,255,255,.05);
       border:1.5px solid rgba(59,130,246,.15);
       color:var(--t1);
       padding:13px 14px 13px 44px;
-      border-radius:13px;
-      font-size:14px;
-      font-family:'Inter',sans-serif;
-      outline:none;
-      transition:all .22s;
+      border-radius:12px;
+      font-size:14px;font-family:'Inter',sans-serif;
+      outline:none;transition:all .2s;
     }
-    .form-input::placeholder{color:rgba(148,183,255,.3)}
-    .form-input:focus{
-      border-color:var(--blue);
-      background:rgba(59,130,246,.07);
-      box-shadow:0 0 0 4px rgba(59,130,246,.13);
+    .finput::placeholder{color:rgba(148,183,255,.28)}
+    .finput:focus{
+      border-color:#3B82F6;
+      background:rgba(59,130,246,.08);
+      box-shadow:0 0 0 4px rgba(59,130,246,.12);
     }
 
-    /* ── Button ── */
-    .btn-login {
-      width:100%;
+    /* Submit button */
+    .btn-sub{
+      width:100%;margin-top:8px;
       background:linear-gradient(135deg,#3B82F6 0%,#1E40AF 100%);
-      color:#fff;
-      padding:15px;
-      border-radius:13px;
-      font-weight:700;
-      font-size:15px;
-      letter-spacing:.01em;
-      border:none;
-      cursor:pointer;
+      color:#fff;padding:14.5px;
+      border-radius:12px;font-weight:700;font-size:15px;
+      letter-spacing:.01em;border:none;cursor:pointer;
       font-family:'Inter',sans-serif;
-      margin-top:10px;
-      transition:all .25s var(--ease);
-      box-shadow:0 4px 24px rgba(59,130,246,.4);
+      transition:all .22s var(--ease);
+      box-shadow:0 4px 22px rgba(59,130,246,.38);
       position:relative;overflow:hidden;
     }
-    .btn-login::before{
+    .btn-sub::after{
       content:'';position:absolute;inset:0;
       background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 55%);
       pointer-events:none;
     }
-    .btn-login:hover:not(:disabled){
+    .btn-sub:hover:not(:disabled){
       transform:translateY(-2px);
-      box-shadow:0 8px 36px rgba(59,130,246,.55);
+      box-shadow:0 8px 32px rgba(59,130,246,.52);
       background:linear-gradient(135deg,#60A5FA 0%,#2563EB 100%);
     }
-    .btn-login:active:not(:disabled){transform:translateY(0)}
-    .btn-login:disabled{opacity:.52;cursor:not-allowed;transform:none;box-shadow:none}
+    .btn-sub:active:not(:disabled){transform:translateY(0)}
+    .btn-sub:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+    .binner{display:flex;align-items:center;justify-content:center;gap:8px}
+    .spin{width:16px;height:16px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .65s linear infinite}
+    @keyframes sp{to{transform:rotate(360deg)}}
 
-    .btn-inner{display:flex;align-items:center;justify-content:center;gap:8px}
-    .spinner{width:16px;height:16px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .65s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
+    /* Divider */
+    .div{display:flex;align-items:center;gap:10px;margin:22px 0 18px}
+    .div::before,.div::after{content:'';flex:1;height:1px;background:rgba(59,130,246,.1)}
+    .div span{font-size:10px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase}
 
-    /* ── Error ── */
-    .error-msg {
-      background:rgba(244,63,94,.08);
-      border:1px solid rgba(244,63,94,.22);
-      color:#FCA5A5;
-      padding:13px 16px;
-      border-radius:11px;
-      font-size:13px;
-      margin-bottom:20px;
-      display:none;
-      text-align:left;
-      animation:shake .35s cubic-bezier(.36,.07,.19,.97) both;
+    /* Security badges */
+    .sec{display:flex;gap:14px;flex-wrap:wrap}
+    .secb{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--t3);font-weight:500}
+
+    /* Mobile: hide left panel */
+    @media(max-width:700px){
+      .panel-left{display:none}
+      .panel-right{padding:40px 28px}
+      .card-outer{max-width:420px}
     }
-    @keyframes shake{
-      0%,100%{transform:translateX(0)}
-      20%{transform:translateX(-7px)}
-      40%{transform:translateX(7px)}
-      60%{transform:translateX(-4px)}
-      80%{transform:translateX(4px)}
-    }
-
-    /* ── Divider ── */
-    .divider{display:flex;align-items:center;gap:12px;margin:26px 0 22px}
-    .divider::before,.divider::after{content:'';flex:1;height:1px;background:rgba(59,130,246,.12)}
-    .divider span{font-size:10px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
-
-    /* ── Security row ── */
-    .sec-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:22px}
-    .sec-badge{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--t3);font-weight:500}
-    .sec-badge svg{opacity:.7}
-
-    /* ── Footer ── */
-    .login-footer{margin-top:28px;font-size:11px;color:var(--t3);line-height:1.8;text-align:center}
-    .login-footer strong{color:var(--t2);font-weight:600}
-
-    /* Responsive */
-    @media(max-width:480px){.login-card{padding:36px 24px 30px}.logo-name{font-size:20px}}
   </style>
 </head>
 <body>
 
-<!-- Background -->
-<div class="o1"></div>
-<div class="o2"></div>
-<div class="o3"></div>
-<div class="bg-grid"></div>
-
-<!-- Decorative crosses -->
-<div class="deco-cross" style="top:8%;right:6%;transform:rotate(10deg)">
-  <svg width="110" height="110" viewBox="0 0 44 44" fill="white">
-    <rect x="16" y="2" width="12" height="40" rx="5"/>
-    <rect x="2" y="16" width="40" height="12" rx="5"/>
-  </svg>
-</div>
-<div class="deco-cross" style="bottom:12%;left:6%;transform:rotate(-8deg)">
-  <svg width="80" height="80" viewBox="0 0 44 44" fill="white">
-    <rect x="16" y="2" width="12" height="40" rx="5"/>
-    <rect x="2" y="16" width="40" height="12" rx="5"/>
-  </svg>
-</div>
-<div class="deco-cross" style="top:50%;left:2%;transform:rotate(5deg)">
-  <svg width="50" height="50" viewBox="0 0 44 44" fill="white">
-    <rect x="16" y="2" width="12" height="40" rx="5"/>
-    <rect x="2" y="16" width="40" height="12" rx="5"/>
-  </svg>
+<!-- Background FX -->
+<div class="bg-fx">
+  <div class="orb orb1"></div>
+  <div class="orb orb2"></div>
+  <div class="orb orb3"></div>
+  <div class="bg-grid"></div>
 </div>
 
-<!-- Login card -->
-<div class="login-wrap">
-  <div class="login-card">
+<!-- Split card -->
+<div class="card-outer">
 
-    <!-- Logo -->
-    <div class="logo-area">
-      <div class="logo-icon-wrap">
-        <!-- Medical cross -->
-        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+  <!-- ── Left brand panel ── -->
+  <div class="panel-left">
+    <div class="brand-top">
+
+      <!-- Icon -->
+      <div class="brand-icon">
+        <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
           <rect x="13" y="2" width="10" height="32" rx="4" fill="rgba(255,255,255,.95)"/>
           <rect x="2" y="13" width="32" height="10" rx="4" fill="rgba(255,255,255,.95)"/>
         </svg>
       </div>
 
+      <div class="brand-name">Juca Guaraná</div>
+      <div class="brand-sub">Secretaria Inteligente · CRM</div>
+
       <!-- Heartbeat line -->
-      <svg class="hb-line" width="120" height="28" viewBox="0 0 120 28" fill="none" style="display:block">
+      <svg class="hb-svg" height="32" viewBox="0 0 260 32" fill="none">
         <path class="hb-path"
-          d="M0 14 L22 14 L28 6 L34 22 L40 2 L46 26 L52 14 L74 14 L80 9 L86 20 L92 14 L120 14"
-          stroke="url(#hbGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-          fill="none"/>
+          d="M0 16 L48 16 L56 7 L64 25 L72 2 L80 30 L88 16 L130 16 L138 10 L146 22 L154 16 L200 16 L208 9 L216 23 L224 16 L260 16"
+          stroke="url(#hg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
         <defs>
-          <linearGradient id="hbGrad" x1="0" y1="0" x2="120" y2="0">
-            <stop offset="0%" stop-color="#3B82F6" stop-opacity=".2"/>
-            <stop offset="45%" stop-color="#60A5FA"/>
-            <stop offset="100%" stop-color="#06B6D4" stop-opacity=".2"/>
+          <linearGradient id="hg" x1="0" y1="0" x2="260" y2="0">
+            <stop offset="0%" stop-color="white" stop-opacity=".12"/>
+            <stop offset="40%" stop-color="white" stop-opacity=".85"/>
+            <stop offset="100%" stop-color="white" stop-opacity=".12"/>
           </linearGradient>
         </defs>
       </svg>
 
-      <div class="logo-name">Juca Guaraná</div>
-      <div class="logo-tag">Secretaria Inteligente &nbsp;·&nbsp; CRM</div>
     </div>
 
-    <!-- Error -->
+    <!-- Features -->
+    <div class="features">
+      <div class="feat">
+        <div class="feat-icon">📅</div>
+        <div class="feat-text">Agenda automatizada
+          <span>Pacientes agendados 24h pelo WhatsApp</span>
+        </div>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">👥</div>
+        <div class="feat-text">CRM de pacientes
+          <span>Histórico, scores e funil de conversão</span>
+        </div>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">🤖</div>
+        <div class="feat-text">IA conversacional
+          <span>Atendimento inteligente via Lara</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="brand-bottom">© 2025 GV Automações · Todos os direitos reservados</div>
+  </div>
+
+  <!-- ── Right form panel ── -->
+  <div class="panel-right">
+
+    <div class="form-title">Bem-vindo de volta</div>
+    <div class="form-desc">Entre com suas credenciais para acessar o painel</div>
+
     <div id="error" class="error-msg"></div>
 
-    <!-- Form -->
     <form id="loginForm" onsubmit="return handleLogin(event)">
 
-      <div class="form-group">
-        <label class="form-label" for="email">E-mail</label>
-        <div class="input-wrap">
-          <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <div class="fg">
+        <label for="email">E-mail</label>
+        <div class="iw">
+          <svg class="iicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
           </svg>
-          <input class="form-input" type="email" id="email" placeholder="seu@email.com.br" required autocomplete="email"/>
+          <input class="finput" type="email" id="email" placeholder="seu@email.com.br" required autocomplete="email"/>
         </div>
       </div>
 
-      <div class="form-group">
-        <label class="form-label" for="password">Senha</label>
-        <div class="input-wrap">
-          <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <div class="fg">
+        <label for="password">Senha</label>
+        <div class="iw">
+          <svg class="iicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
           </svg>
-          <input class="form-input" type="password" id="password" placeholder="••••••••" required autocomplete="current-password"/>
+          <input class="finput" type="password" id="password" placeholder="••••••••" required autocomplete="current-password"/>
         </div>
       </div>
 
-      <button type="submit" class="btn-login" id="btnLogin">
-        <span class="btn-inner" id="btnInner">
+      <button type="submit" class="btn-sub" id="btnSub">
+        <span class="binner" id="bInner">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>
           </svg>
@@ -352,86 +362,67 @@
 
     </form>
 
-    <!-- Divider -->
-    <div class="divider"><span>acesso seguro</span></div>
+    <div class="div"><span>acesso seguro</span></div>
 
-    <!-- Security badges -->
-    <div class="sec-row">
-      <span class="sec-badge">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <div class="sec">
+      <span class="secb">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         Criptografia TLS
       </span>
-      <span class="sec-badge">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span class="secb">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         Sessão segura
       </span>
-      <span class="sec-badge">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+      <span class="secb">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
         Multi-tenant
       </span>
-    </div>
-
-    <!-- Footer -->
-    <div class="login-footer">
-      <strong>Juca Guaraná</strong> — Secretaria Virtual Inteligente<br>
-      <span style="opacity:.55;font-size:10px">Powered by GV Automações</span>
     </div>
 
   </div>
 </div>
 
 <script>
-  var SUPABASE_URL = 'https://edamtnxcwuuydwwbimvz.supabase.co';
-  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkYW10bnhjd3V1eWR3d2JpbXZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0NDI2MzksImV4cCI6MjA4NjAxODYzOX0.uzu52-qEHatsBoQBJj145wDROcbuYSNFbSzgWDrqUeg';
-  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  var SB_URL='https://edamtnxcwuuydwwbimvz.supabase.co';
+  var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkYW10bnhjd3V1eWR3d2JpbXZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0NDI2MzksImV4cCI6MjA4NjAxODYzOX0.uzu52-qEHatsBoQBJj145wDROcbuYSNFbSzgWDrqUeg';
+  var sb=window.supabase.createClient(SB_URL,SB_KEY);
 
-  (async function checkSession(){
+  (async function(){
     var{data}=await sb.auth.getSession();
-    if(data&&data.session&&data.session.access_token){
-      window.location.href='/crm/';
-    }
+    if(data&&data.session)window.location.href='/crm/';
   })();
 
-  function showError(msg){
+  var LOGIN_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Entrar no painel';
+
+  function showErr(msg){
     var el=document.getElementById('error');
-    el.textContent=msg;
-    el.style.display='block';
-    // re-trigger shake
-    el.style.animation='none';
-    el.offsetHeight;
-    el.style.animation='shake .35s cubic-bezier(.36,.07,.19,.97) both';
+    el.textContent=msg;el.style.display='block';
+    el.style.animation='none';el.offsetHeight;
+    el.style.animation='shake .32s cubic-bezier(.36,.07,.19,.97) both';
   }
-  function hideError(){document.getElementById('error').style.display='none';}
+  function hideErr(){document.getElementById('error').style.display='none';}
 
   async function handleLogin(e){
-    e.preventDefault();
-    hideError();
+    e.preventDefault();hideErr();
     var email=document.getElementById('email').value.trim();
-    var password=document.getElementById('password').value;
-    var btn=document.getElementById('btnLogin');
-    var inner=document.getElementById('btnInner');
-    if(!email||!password){showError('Preencha e-mail e senha.');return false;}
-
+    var pwd=document.getElementById('password').value;
+    var btn=document.getElementById('btnSub');
+    var inner=document.getElementById('bInner');
+    if(!email||!pwd){showErr('Preencha e-mail e senha.');return false;}
     btn.disabled=true;
-    inner.innerHTML='<span class="spinner"></span> Entrando...';
-
+    inner.innerHTML='<span class="spin"></span> Entrando...';
     try{
-      var{data,error}=await sb.auth.signInWithPassword({email,password});
+      var{data,error}=await sb.auth.signInWithPassword({email,password:pwd});
       if(error){
-        var msg='E-mail ou senha incorretos.';
-        if(error.message.includes('Email not confirmed'))msg='E-mail ainda não confirmado.';
-        else if(!error.message.includes('Invalid'))msg=error.message;
-        showError(msg);
-        btn.disabled=false;
-        inner.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Entrar no painel';
-        return false;
+        var m='E-mail ou senha incorretos.';
+        if(error.message.includes('Email not confirmed'))m='E-mail ainda não confirmado.';
+        else if(!error.message.includes('Invalid'))m=error.message;
+        showErr(m);btn.disabled=false;inner.innerHTML=LOGIN_ICON;return false;
       }
       if(data&&data.session){window.location.href='/crm/';}
-      else{showError('Erro inesperado. Tente novamente.');btn.disabled=false;inner.textContent='Entrar no painel';}
+      else{showErr('Erro inesperado. Tente novamente.');btn.disabled=false;inner.innerHTML=LOGIN_ICON;}
     }catch(err){
-      showError('Erro de conexão. Verifique sua internet.');
-      btn.disabled=false;
-      inner.textContent='Entrar no painel';
+      showErr('Erro de conexão. Verifique sua internet.');btn.disabled=false;inner.innerHTML=LOGIN_ICON;
     }
     return false;
   }
