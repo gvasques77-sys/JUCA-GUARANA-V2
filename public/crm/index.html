@@ -427,14 +427,35 @@ function T2(p){
       h('table',null,
         h('thead',null,h('tr',null,h('th',null,'Paciente'),h('th',null,'M\u00e9dico'),h('th',null,'Est\u00e1gio'),h('th',{style:{textAlign:'center'}},'Score'),h('th',{style:{textAlign:'center'}},'Consultas'),h('th',null,'Pr\u00f3ximo Agend.'),h('th',{style:{textAlign:'right'}},'\u00DAlt. Contato'))),
         h('tbody',null,pts.map(function(pt){
-          return h('tr',{key:pt.patient_id,className:'trow',style:{cursor:'pointer'},onClick:function(){p.onSel(pt.patient_id,pt.patient_name)}},
-            h('td',null,h('div',{style:{fontWeight:600}},pt.patient_name),h('div',{style:{fontSize:12,color:'var(--t3)'}},pt.phone)),
+          var daysSince=pt.last_contact_at?Math.floor((Date.now()-new Date(pt.last_contact_at).getTime())/86400000):999;
+          var isVeryStale=daysSince>60;var isStale=daysSince>30;var isFresh=daysSince<7;
+          var hasNS=(pt.total_no_shows||0)>0;
+          var sc=pt.stage_color||'rgba(255,255,255,.15)';
+          var rowBg=isVeryStale?'rgba(244,63,94,.06)':hasNS?'rgba(245,158,11,.05)':'transparent';
+          var contactColor=isVeryStale?'var(--rose)':isStale?'var(--amber)':isFresh?'var(--green)':'var(--t3)';
+          return h('tr',{key:pt.patient_id,className:'trow',style:{cursor:'pointer',background:rowBg},onClick:function(){p.onSel(pt.patient_id,pt.patient_name)}},
+            h('td',{style:{borderLeft:'4px solid '+sc,paddingLeft:14}},
+              h('div',{style:{fontWeight:600}},pt.patient_name),
+              h('div',{style:{fontSize:12,color:'var(--t3)'}},pt.phone)
+            ),
             h('td',null,pt.doctor_name?h('div',null,h('div',{style:{fontSize:13}},pt.doctor_name),h('div',{style:{fontSize:11,color:'var(--t3)'}},pt.doctor_specialty||'')):h('span',{style:{color:'var(--t3)',fontSize:12}},'\u2014')),
             h('td',null,h(Bg,{stage:pt.current_stage,color:pt.stage_color})),
             h('td',{style:{textAlign:'center'}},h('span',{className:'mono',style:{fontWeight:600,color:(pt.lead_score||0)>=60?'var(--green)':(pt.lead_score||0)>=30?'var(--amber)':'var(--t3)'}},pt.lead_score||0)),
-            h('td',{style:{textAlign:'center'}},h('span',{className:'mono'},pt.total_appointments||0),(pt.total_no_shows||0)>0?h('span',{style:{color:'var(--rose)',fontSize:11,marginLeft:4}},'('+pt.total_no_shows+' NS)'):null),
-            h('td',null,pt.next_appointment?h('div',null,h('div',{style:{fontSize:12,color:'var(--blue)'}},fd(pt.next_appointment.date)+' '+(pt.next_appointment.time||'').substring(0,5)),h('div',{style:{fontSize:11,color:'var(--t3)'}},pt.next_appointment.doctor||'')):h('span',{style:{color:'var(--t3)',fontSize:12}},'\u2014')),
-            h('td',{style:{textAlign:'right',color:'var(--t3)',fontSize:12}},pt.last_contact_at?ago(pt.last_contact_at):'\u2014')
+            h('td',{style:{textAlign:'center'}},
+              h('span',{className:'mono'},pt.total_appointments||0),
+              hasNS?h('span',{className:'badge',style:{background:'rgba(244,63,94,.15)',color:'var(--rose)',marginLeft:6,fontSize:10,fontWeight:700}},'\u26A0 '+pt.total_no_shows+' NS'):null
+            ),
+            h('td',null,pt.next_appointment
+              ?h('div',null,
+                  h('div',{style:{fontSize:12,color:'var(--blue)'}},fd(pt.next_appointment.date)+' '+(pt.next_appointment.time||'').substring(0,5)),
+                  h('div',{style:{fontSize:11,color:'var(--t3)'}},pt.next_appointment.doctor||''))
+              :h('span',{style:{fontSize:12,color:'var(--t3)',fontStyle:'italic'}},'sem agend.')
+            ),
+            h('td',{style:{textAlign:'right',color:contactColor,fontSize:12,fontWeight:isVeryStale||isStale?600:400}},
+              isVeryStale?'\u26A0 '+(pt.last_contact_at?ago(pt.last_contact_at):'\u2014'):
+              isFresh?'\u2713 '+(pt.last_contact_at?ago(pt.last_contact_at):'\u2014'):
+              pt.last_contact_at?ago(pt.last_contact_at):'\u2014'
+            )
           );
         }))
       )
