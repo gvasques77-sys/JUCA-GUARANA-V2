@@ -290,6 +290,15 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
+
+// ── LOG GLOBAL DE ENTRADA ────────────────────────────────────────────────
+// Loga TODA requisição que chega ao servidor antes de qualquer middleware.
+// Se esse log não aparecer no Railway, significa que a requisição não chegou.
+app.use((req, _res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.path} | ip=${req.ip} | ua=${(req.headers['user-agent'] || '').substring(0, 60)}`);
+  next();
+});
+
 // Captura rawBody para validação HMAC antes do parse.
 // O verify callback é executado pelo express.json ANTES de deserializar.
 app.use(express.json({
@@ -316,9 +325,13 @@ app.get(/^\/crm\/(?!api|login).*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'crm', 'index.html'));
 });
 
-const log = pino({
-  transport: { target: 'pino-pretty' },
-});
+// pino-pretty em produção usa worker thread que pode não aparecer no Railway.
+// Usar pino puro (JSON) em produção e pretty apenas em desenvolvimento.
+const log = pino(
+  process.env.NODE_ENV === 'production'
+    ? { level: 'info' }                         // stdout JSON — capturado pelo Railway
+    : { transport: { target: 'pino-pretty' } }  // legível no terminal local
+);
 
 // ======================================================
 // VARIÁVEIS DE AMBIENTE
@@ -402,7 +415,10 @@ if (!AGENT_API_KEY) {
 }
 
 function checkAgentAuth(req, res, next) {
-  if (!AGENT_API_KEY) return next(); // dev mode sem key: permite
+  if (!AGENT_API_KEY) {
+    console.log(`[AUTH] AGENT_API_KEY não definido — modo dev, bypass`);
+    return next();
+  }
 
   const key =
     req.headers['x-api-key'] ||
@@ -411,11 +427,13 @@ function checkAgentAuth(req, res, next) {
       : null);
 
   if (!key || key !== AGENT_API_KEY) {
+    console.warn(`[AUTH][BLOCKED] 401 — chave ausente ou inválida | path=${req.path} | has_key=${!!key}`);
     return res.status(401).json({
       error: 'unauthorized',
       message: 'x-api-key ou Authorization: Bearer <token> requerido.',
     });
   }
+  console.log(`[AUTH] OK — chave válida`);
   next();
 }
 
@@ -432,11 +450,14 @@ if (!N8N_WEBHOOK_SECRET) {
 }
 
 function verifyWebhookSignature(req, res, next) {
-  if (!N8N_WEBHOOK_SECRET) return next(); // dev mode
+  if (!N8N_WEBHOOK_SECRET) {
+    console.log(`[HMAC] N8N_WEBHOOK_SECRET não definido — modo dev, bypass`);
+    return next();
+  }
 
   const sigHeader = req.headers['x-webhook-signature'];
   if (!sigHeader) {
-    log.warn({ path: req.path }, '[HMAC] Header X-Webhook-Signature ausente');
+    console.warn(`[HMAC][BLOCKED] 401 — Header X-Webhook-Signature AUSENTE | path=${req.path}`);
     return res.status(401).json({ error: 'missing_signature' });
   }
 
@@ -445,18 +466,19 @@ function verifyWebhookSignature(req, res, next) {
     .update(rawBody)
     .digest('hex');
 
-  // timingSafeEqual previne timing attacks
   try {
     const a = Buffer.from(sigHeader.padEnd(expected.length));
     const b = Buffer.from(expected);
     if (a.length !== b.length || !timingSafeEqual(a, b)) {
-      log.warn({ sig: sigHeader.substring(0, 16) + '…' }, '[HMAC] Assinatura inválida');
+      console.warn(`[HMAC][BLOCKED] 401 — Assinatura INVÁLIDA | sig_recebida=${sigHeader.substring(0, 16)}…`);
       return res.status(401).json({ error: 'invalid_signature' });
     }
-  } catch {
+  } catch (e) {
+    console.warn(`[HMAC][BLOCKED] 401 — Erro ao validar assinatura: ${e.message}`);
     return res.status(401).json({ error: 'invalid_signature' });
   }
 
+  console.log(`[HMAC] Assinatura OK`);
   next();
 }
 
@@ -1970,6 +1992,11 @@ app.get('/history', checkAgentAuth, async (req, res) => {
 // ROTA PRINCIPAL: /process
 // ======================================================
 app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) => {
+  // ── LOG DE ENTRADA OBRIGATÓRIO ───────────────────────────────────────────
+  // Se esse log não aparecer no Railway, a requisição foi bloqueada antes
+  // de chegar aqui (HMAC, auth, parse error, ou problema de rede/URL no n8n).
+  console.log(`[PROCESS] ▶ POST /process recebido | body_keys=${Object.keys(req.body || {}).join(',')} | content_type=${req.headers['content-type']}`);
+
   const started = Date.now();
   const DEBUG = process.env.DEBUG === 'true';
   const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS || 2);
@@ -1978,6 +2005,7 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
   // 1) VALIDAR DADOS DE ENTRADA
   const parsed = EnvelopeSchema.safeParse(req.body);
   if (!parsed.success) {
+    console.warn(`[PROCESS] 400 — EnvelopeSchema inválido | errors=${JSON.stringify(parsed.error.flatten())}`);
     return res.status(400).json({
       error: 'invalid_envelope',
       details: parsed.error.flatten(),
@@ -1985,6 +2013,7 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
   }
 
   const envelope = parsed.data;
+  console.log(`[PROCESS] envelope OK | from=${envelope.from} | clinic=${envelope.clinic_id} | msg="${(envelope.message_text || '').substring(0, 80)}"`);
 
   // Helper: parser JSON seguro
   const safeJsonParse = (s) => {
