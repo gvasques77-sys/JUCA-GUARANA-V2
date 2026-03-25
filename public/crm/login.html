@@ -3,127 +3,438 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Login — Dashboard CRM</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <title>Juca Guaraná — Acesso ao Painel</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <style>
-    :root{--bg:#0B1120;--bg2:#111827;--card:#1A2332;--bdr:#1E3A5F;--t1:#F1F5F9;--t2:#94A3B8;--t3:#64748B;--blue:#3B82F6;--green:#10B981;--rose:#F43F5E}
+    :root {
+      --blue:#3B82F6; --blue2:#60A5FA; --blue3:#1D4ED8;
+      --cyan:#06B6D4; --violet:#818CF8;
+      --bg:#050D1A; --card:rgba(8,22,48,.9);
+      --bdr:rgba(59,130,246,.18); --bdr2:rgba(59,130,246,.32);
+      --t1:#EEF4FF; --t2:rgba(188,213,255,.72); --t3:rgba(148,183,255,.42);
+      --rose:#F43F5E; --green:#34D399;
+      --ease:cubic-bezier(.16,1,.3,1);
+    }
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;display:flex;align-items:center;justify-content:center}
-    .login-container{width:100%;max-width:400px;padding:20px}
-    .login-card{background:var(--card);border:1px solid var(--bdr);border-radius:16px;padding:40px 32px;text-align:center}
-    .logo{font-size:28px;font-weight:700;color:var(--green);margin-bottom:4px}
-    .subtitle{font-size:13px;color:var(--t3);margin-bottom:32px;letter-spacing:.05em}
-    .form-group{margin-bottom:16px;text-align:left}
-    .form-group label{display:block;font-size:13px;color:var(--t2);margin-bottom:6px;font-weight:500}
-    .form-group input{width:100%;background:var(--bg2);border:1px solid var(--bdr);color:var(--t1);padding:12px 14px;border-radius:10px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s}
-    .form-group input:focus{border-color:var(--blue)}
-    .btn-login{width:100%;background:var(--blue);color:#fff;padding:12px;border-radius:10px;font-weight:600;font-size:15px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:8px;transition:background .2s}
-    .btn-login:hover{background:#2563EB}
-    .btn-login:disabled{opacity:.5;cursor:not-allowed}
-    .error-msg{background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.25);color:#FDA4AF;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;display:none}
-    .footer{margin-top:24px;font-size:11px;color:var(--t3)}
-    .footer a{color:var(--blue);text-decoration:none}
+
+    body {
+      font-family:'Inter',sans-serif;
+      background:var(--bg);
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      position:relative;
+    }
+
+    /* ── Background canvas ── */
+    .bg-orb {
+      position:fixed;
+      border-radius:50%;
+      pointer-events:none;
+      filter:blur(90px);
+    }
+    .o1{width:600px;height:600px;top:-140px;left:-140px;
+        background:radial-gradient(circle,rgba(59,130,246,.22) 0%,transparent 70%);
+        animation:drift1 16s ease-in-out infinite alternate;}
+    .o2{width:500px;height:500px;bottom:-120px;right:-120px;
+        background:radial-gradient(circle,rgba(6,182,212,.18) 0%,transparent 70%);
+        animation:drift2 20s ease-in-out infinite alternate;}
+    .o3{width:380px;height:380px;top:42%;left:55%;
+        background:radial-gradient(circle,rgba(129,140,248,.12) 0%,transparent 70%);
+        animation:drift1 12s ease-in-out infinite alternate-reverse;}
+
+    @keyframes drift1{0%{transform:translate(0,0) scale(1)}100%{transform:translate(28px,-22px) scale(1.06)}}
+    @keyframes drift2{0%{transform:translate(0,0) scale(1)}100%{transform:translate(-24px,18px) scale(1.08)}}
+
+    /* Grid lines */
+    .bg-grid {
+      position:fixed;inset:0;pointer-events:none;
+      background-image:
+        linear-gradient(rgba(59,130,246,.05) 1px, transparent 1px),
+        linear-gradient(90deg,rgba(59,130,246,.05) 1px, transparent 1px);
+      background-size:64px 64px;
+    }
+
+    /* Floating medical cross decorations */
+    .deco-cross {
+      position:fixed;pointer-events:none;opacity:.04;
+    }
+    .deco-cross svg{display:block;}
+
+    /* ── Login card ── */
+    .login-wrap {
+      width:100%;max-width:430px;padding:20px;
+      position:relative;z-index:10;
+      animation:card-in .8s var(--ease) both;
+    }
+    @keyframes card-in{
+      from{opacity:0;transform:translateY(36px) scale(.97)}
+      to{opacity:1;transform:translateY(0) scale(1)}
+    }
+
+    .login-card {
+      background:var(--card);
+      border:1px solid var(--bdr);
+      border-radius:26px;
+      padding:48px 40px 40px;
+      text-align:center;
+      backdrop-filter:blur(32px);
+      -webkit-backdrop-filter:blur(32px);
+      box-shadow:
+        0 32px 80px rgba(0,0,0,.55),
+        0 0 0 1px rgba(59,130,246,.06),
+        inset 0 1px 0 rgba(255,255,255,.06);
+    }
+
+    /* ── Logo area ── */
+    .logo-area { margin-bottom:36px; }
+
+    .logo-icon-wrap {
+      display:inline-flex;
+      align-items:center;justify-content:center;
+      width:72px;height:72px;
+      background:linear-gradient(135deg,#2563EB 0%,#0891B2 100%);
+      border-radius:22px;
+      margin-bottom:18px;
+      box-shadow:0 8px 32px rgba(37,99,235,.5), 0 0 0 10px rgba(59,130,246,.1);
+      animation:icon-pulse 3.5s ease-in-out infinite;
+      position:relative;
+    }
+    @keyframes icon-pulse{
+      0%,100%{box-shadow:0 8px 32px rgba(37,99,235,.5),0 0 0 10px rgba(59,130,246,.1)}
+      50%{box-shadow:0 8px 44px rgba(37,99,235,.7),0 0 0 14px rgba(59,130,246,.14)}
+    }
+
+    /* Heartbeat line under icon */
+    .hb-line {
+      display:block;margin:0 auto 14px;
+      animation:hb-draw 2s linear infinite;
+      overflow:visible;
+    }
+    @keyframes hb-draw{
+      0%{stroke-dashoffset:200}
+      60%,100%{stroke-dashoffset:0}
+    }
+    .hb-path{
+      stroke-dasharray:200;
+      stroke-dashoffset:0;
+      animation:hb-anim 2.2s ease-in-out infinite;
+    }
+    @keyframes hb-anim{
+      0%,100%{opacity:.45}
+      40%{opacity:1}
+      80%{opacity:.45}
+    }
+
+    .logo-name {
+      font-size:24px;font-weight:800;letter-spacing:-.03em;
+      background:linear-gradient(135deg,#EEF4FF 0%,#93C5FD 50%,#67E8F9 100%);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+      background-clip:text;
+      margin-bottom:5px;
+    }
+    .logo-tag {
+      font-size:10.5px;font-weight:600;color:var(--t3);
+      letter-spacing:.14em;text-transform:uppercase;
+    }
+
+    /* ── Form ── */
+    .form-group { margin-bottom:18px;text-align:left; }
+
+    .form-label {
+      display:block;font-size:11px;font-weight:700;
+      color:var(--t2);margin-bottom:8px;
+      letter-spacing:.07em;text-transform:uppercase;
+    }
+
+    .input-wrap { position:relative; }
+
+    .input-icon {
+      position:absolute;left:14px;top:50%;
+      transform:translateY(-50%);
+      width:17px;height:17px;
+      color:var(--t3);pointer-events:none;
+      transition:color .2s;
+    }
+    .input-wrap:focus-within .input-icon { color:var(--blue2); }
+
+    .form-input {
+      width:100%;
+      background:rgba(255,255,255,.04);
+      border:1.5px solid rgba(59,130,246,.15);
+      color:var(--t1);
+      padding:13px 14px 13px 44px;
+      border-radius:13px;
+      font-size:14px;
+      font-family:'Inter',sans-serif;
+      outline:none;
+      transition:all .22s;
+    }
+    .form-input::placeholder{color:rgba(148,183,255,.3)}
+    .form-input:focus{
+      border-color:var(--blue);
+      background:rgba(59,130,246,.07);
+      box-shadow:0 0 0 4px rgba(59,130,246,.13);
+    }
+
+    /* ── Button ── */
+    .btn-login {
+      width:100%;
+      background:linear-gradient(135deg,#3B82F6 0%,#1E40AF 100%);
+      color:#fff;
+      padding:15px;
+      border-radius:13px;
+      font-weight:700;
+      font-size:15px;
+      letter-spacing:.01em;
+      border:none;
+      cursor:pointer;
+      font-family:'Inter',sans-serif;
+      margin-top:10px;
+      transition:all .25s var(--ease);
+      box-shadow:0 4px 24px rgba(59,130,246,.4);
+      position:relative;overflow:hidden;
+    }
+    .btn-login::before{
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 55%);
+      pointer-events:none;
+    }
+    .btn-login:hover:not(:disabled){
+      transform:translateY(-2px);
+      box-shadow:0 8px 36px rgba(59,130,246,.55);
+      background:linear-gradient(135deg,#60A5FA 0%,#2563EB 100%);
+    }
+    .btn-login:active:not(:disabled){transform:translateY(0)}
+    .btn-login:disabled{opacity:.52;cursor:not-allowed;transform:none;box-shadow:none}
+
+    .btn-inner{display:flex;align-items:center;justify-content:center;gap:8px}
+    .spinner{width:16px;height:16px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .65s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* ── Error ── */
+    .error-msg {
+      background:rgba(244,63,94,.08);
+      border:1px solid rgba(244,63,94,.22);
+      color:#FCA5A5;
+      padding:13px 16px;
+      border-radius:11px;
+      font-size:13px;
+      margin-bottom:20px;
+      display:none;
+      text-align:left;
+      animation:shake .35s cubic-bezier(.36,.07,.19,.97) both;
+    }
+    @keyframes shake{
+      0%,100%{transform:translateX(0)}
+      20%{transform:translateX(-7px)}
+      40%{transform:translateX(7px)}
+      60%{transform:translateX(-4px)}
+      80%{transform:translateX(4px)}
+    }
+
+    /* ── Divider ── */
+    .divider{display:flex;align-items:center;gap:12px;margin:26px 0 22px}
+    .divider::before,.divider::after{content:'';flex:1;height:1px;background:rgba(59,130,246,.12)}
+    .divider span{font-size:10px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+
+    /* ── Security row ── */
+    .sec-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:22px}
+    .sec-badge{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--t3);font-weight:500}
+    .sec-badge svg{opacity:.7}
+
+    /* ── Footer ── */
+    .login-footer{margin-top:28px;font-size:11px;color:var(--t3);line-height:1.8;text-align:center}
+    .login-footer strong{color:var(--t2);font-weight:600}
+
+    /* Responsive */
+    @media(max-width:480px){.login-card{padding:36px 24px 30px}.logo-name{font-size:20px}}
   </style>
 </head>
 <body>
-  <div class="login-container">
-    <div class="login-card">
-      <div class="logo">Painel CRM</div>
-      <div class="subtitle">GV AUTOMA&#199;&#213;ES</div>
 
-      <div id="error" class="error-msg"></div>
+<!-- Background -->
+<div class="o1"></div>
+<div class="o2"></div>
+<div class="o3"></div>
+<div class="bg-grid"></div>
 
-      <form id="loginForm" onsubmit="return handleLogin(event)">
-        <div class="form-group">
-          <label for="email">Email</label>
-          <input type="email" id="email" placeholder="seu@email.com" required autocomplete="email" />
-        </div>
-        <div class="form-group">
-          <label for="password">Senha</label>
-          <input type="password" id="password" placeholder="Sua senha" required autocomplete="current-password" />
-        </div>
-        <button type="submit" class="btn-login" id="btnLogin">Entrar</button>
-      </form>
+<!-- Decorative crosses -->
+<div class="deco-cross" style="top:8%;right:6%;transform:rotate(10deg)">
+  <svg width="110" height="110" viewBox="0 0 44 44" fill="white">
+    <rect x="16" y="2" width="12" height="40" rx="5"/>
+    <rect x="2" y="16" width="40" height="12" rx="5"/>
+  </svg>
+</div>
+<div class="deco-cross" style="bottom:12%;left:6%;transform:rotate(-8deg)">
+  <svg width="80" height="80" viewBox="0 0 44 44" fill="white">
+    <rect x="16" y="2" width="12" height="40" rx="5"/>
+    <rect x="2" y="16" width="40" height="12" rx="5"/>
+  </svg>
+</div>
+<div class="deco-cross" style="top:50%;left:2%;transform:rotate(5deg)">
+  <svg width="50" height="50" viewBox="0 0 44 44" fill="white">
+    <rect x="16" y="2" width="12" height="40" rx="5"/>
+    <rect x="2" y="16" width="40" height="12" rx="5"/>
+  </svg>
+</div>
 
-      <div class="footer">
-        Juca Guaran&#225; &mdash; Secretaria Virtual Inteligente
+<!-- Login card -->
+<div class="login-wrap">
+  <div class="login-card">
+
+    <!-- Logo -->
+    <div class="logo-area">
+      <div class="logo-icon-wrap">
+        <!-- Medical cross -->
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+          <rect x="13" y="2" width="10" height="32" rx="4" fill="rgba(255,255,255,.95)"/>
+          <rect x="2" y="13" width="32" height="10" rx="4" fill="rgba(255,255,255,.95)"/>
+        </svg>
       </div>
+
+      <!-- Heartbeat line -->
+      <svg class="hb-line" width="120" height="28" viewBox="0 0 120 28" fill="none" style="display:block">
+        <path class="hb-path"
+          d="M0 14 L22 14 L28 6 L34 22 L40 2 L46 26 L52 14 L74 14 L80 9 L86 20 L92 14 L120 14"
+          stroke="url(#hbGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          fill="none"/>
+        <defs>
+          <linearGradient id="hbGrad" x1="0" y1="0" x2="120" y2="0">
+            <stop offset="0%" stop-color="#3B82F6" stop-opacity=".2"/>
+            <stop offset="45%" stop-color="#60A5FA"/>
+            <stop offset="100%" stop-color="#06B6D4" stop-opacity=".2"/>
+          </linearGradient>
+        </defs>
+      </svg>
+
+      <div class="logo-name">Juca Guaraná</div>
+      <div class="logo-tag">Secretaria Inteligente &nbsp;·&nbsp; CRM</div>
     </div>
+
+    <!-- Error -->
+    <div id="error" class="error-msg"></div>
+
+    <!-- Form -->
+    <form id="loginForm" onsubmit="return handleLogin(event)">
+
+      <div class="form-group">
+        <label class="form-label" for="email">E-mail</label>
+        <div class="input-wrap">
+          <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+          </svg>
+          <input class="form-input" type="email" id="email" placeholder="seu@email.com.br" required autocomplete="email"/>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="password">Senha</label>
+        <div class="input-wrap">
+          <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          <input class="form-input" type="password" id="password" placeholder="••••••••" required autocomplete="current-password"/>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-login" id="btnLogin">
+        <span class="btn-inner" id="btnInner">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>
+          </svg>
+          Entrar no painel
+        </span>
+      </button>
+
+    </form>
+
+    <!-- Divider -->
+    <div class="divider"><span>acesso seguro</span></div>
+
+    <!-- Security badges -->
+    <div class="sec-row">
+      <span class="sec-badge">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Criptografia TLS
+      </span>
+      <span class="sec-badge">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Sessão segura
+      </span>
+      <span class="sec-badge">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+        Multi-tenant
+      </span>
+    </div>
+
+    <!-- Footer -->
+    <div class="login-footer">
+      <strong>Juca Guaraná</strong> — Secretaria Virtual Inteligente<br>
+      <span style="opacity:.55;font-size:10px">Powered by GV Automações</span>
+    </div>
+
   </div>
+</div>
 
-  <script>
-    var SUPABASE_URL = 'https://edamtnxcwuuydwwbimvz.supabase.co';
-    var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkYW10bnhjd3V1eWR3d2JpbXZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0NDI2MzksImV4cCI6MjA4NjAxODYzOX0.uzu52-qEHatsBoQBJj145wDROcbuYSNFbSzgWDrqUeg';
+<script>
+  var SUPABASE_URL = 'https://edamtnxcwuuydwwbimvz.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkYW10bnhjd3V1eWR3d2JpbXZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0NDI2MzksImV4cCI6MjA4NjAxODYzOX0.uzu52-qEHatsBoQBJj145wDROcbuYSNFbSzgWDrqUeg';
+  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-    // Se já tem sessão válida, redirecionar direto
-    // O Supabase client persiste a sessão automaticamente no localStorage
-    (async function checkSession() {
-      var { data } = await sb.auth.getSession();
-      if (data && data.session && data.session.access_token) {
-        window.location.href = '/crm/';
-      }
-    })();
-
-    function showError(msg) {
-      var el = document.getElementById('error');
-      el.textContent = msg;
-      el.style.display = 'block';
+  (async function checkSession(){
+    var{data}=await sb.auth.getSession();
+    if(data&&data.session&&data.session.access_token){
+      window.location.href='/crm/';
     }
+  })();
 
-    function hideError() {
-      document.getElementById('error').style.display = 'none';
-    }
+  function showError(msg){
+    var el=document.getElementById('error');
+    el.textContent=msg;
+    el.style.display='block';
+    // re-trigger shake
+    el.style.animation='none';
+    el.offsetHeight;
+    el.style.animation='shake .35s cubic-bezier(.36,.07,.19,.97) both';
+  }
+  function hideError(){document.getElementById('error').style.display='none';}
 
-    async function handleLogin(e) {
-      e.preventDefault();
-      hideError();
+  async function handleLogin(e){
+    e.preventDefault();
+    hideError();
+    var email=document.getElementById('email').value.trim();
+    var password=document.getElementById('password').value;
+    var btn=document.getElementById('btnLogin');
+    var inner=document.getElementById('btnInner');
+    if(!email||!password){showError('Preencha e-mail e senha.');return false;}
 
-      var email = document.getElementById('email').value.trim();
-      var password = document.getElementById('password').value;
-      var btn = document.getElementById('btnLogin');
+    btn.disabled=true;
+    inner.innerHTML='<span class="spinner"></span> Entrando...';
 
-      if (!email || !password) {
-        showError('Preencha email e senha.');
+    try{
+      var{data,error}=await sb.auth.signInWithPassword({email,password});
+      if(error){
+        var msg='E-mail ou senha incorretos.';
+        if(error.message.includes('Email not confirmed'))msg='E-mail ainda não confirmado.';
+        else if(!error.message.includes('Invalid'))msg=error.message;
+        showError(msg);
+        btn.disabled=false;
+        inner.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Entrar no painel';
         return false;
       }
-
-      btn.disabled = true;
-      btn.textContent = 'Entrando...';
-
-      try {
-        var { data, error } = await sb.auth.signInWithPassword({ email: email, password: password });
-
-        if (error) {
-          var msg = 'Email ou senha incorretos.';
-          if (error.message.includes('Invalid login')) msg = 'Email ou senha incorretos.';
-          else if (error.message.includes('Email not confirmed')) msg = 'Email ainda n\u00e3o confirmado.';
-          else msg = error.message;
-          showError(msg);
-          btn.disabled = false;
-          btn.textContent = 'Entrar';
-          return false;
-        }
-
-        if (data && data.session) {
-          // Supabase client persiste a sessão automaticamente
-          // index.html usa sbClient.auth.getSession() para recuperar o token
-          window.location.href = '/crm/';
-        } else {
-          showError('Erro inesperado ao fazer login.');
-          btn.disabled = false;
-          btn.textContent = 'Entrar';
-        }
-      } catch (err) {
-        showError('Erro de conex\u00e3o. Tente novamente.');
-        btn.disabled = false;
-        btn.textContent = 'Entrar';
-      }
-
-      return false;
+      if(data&&data.session){window.location.href='/crm/';}
+      else{showError('Erro inesperado. Tente novamente.');btn.disabled=false;inner.textContent='Entrar no painel';}
+    }catch(err){
+      showError('Erro de conexão. Verifique sua internet.');
+      btn.disabled=false;
+      inner.textContent='Entrar no painel';
     }
-  </script>
+    return false;
+  }
+</script>
 </body>
 </html>
