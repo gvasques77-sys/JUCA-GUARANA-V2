@@ -633,13 +633,19 @@ function PatientModal(p){
           h('thead',null,h('tr',null,h('th',null,'Data'),h('th',null,'Hor\u00e1rio'),h('th',null,'M\u00e9dico'),h('th',null,'Servi\u00e7o'),h('th',null,'Status'),isOwner?h('th',{style:{textAlign:'right'}},'Valor'):null)),
           h('tbody',null,appts.map(function(a,i){
             var c=stC[a.status]||'#3B82F6';
-            return h('tr',{key:a.id||i,className:'trow'},
-              h('td',null,fd(a.appointment_date)),
+            var isCncl=a.status==='cancelled';var isNS=a.status==='no_show';var isDone=a.status==='completed';
+            return h('tr',{key:a.id||i,className:'trow',style:{
+              background:isCncl?'rgba(244,63,94,.07)':isNS?'rgba(245,158,11,.07)':isDone?'rgba(34,197,94,.04)':'transparent',
+              opacity:isCncl?0.6:isNS?0.75:1
+            }},
+              h('td',{style:{borderLeft:'3px solid '+c,paddingLeft:14}},
+                h('div',{style:{textDecoration:isCncl?'line-through':'none',color:isCncl?'var(--t3)':'inherit',fontSize:13}},fd(a.appointment_date))
+              ),
               h('td',{className:'mono'},((a.start_time||'').substring(0,5))),
               h('td',null,a.doctors?h('div',null,h('div',{style:{fontWeight:500}},a.doctors.name),h('div',{style:{fontSize:11,color:'var(--t3)'}},a.doctors.specialty)):'\u2014'),
               h('td',{style:{fontSize:12}},a.doctor_services?a.doctor_services.name:'\u2014'),
               h('td',null,h('span',{className:'badge',style:{background:c+'25',color:c}},stL[a.status]||a.status)),
-              isOwner?h('td',{className:'mono',style:{textAlign:'right',color:'var(--green)'}},a.price?cur(a.price):'\u2014'):null
+              isOwner?h('td',{className:'mono',style:{textAlign:'right',color:isCncl||isNS?'var(--t3)':'var(--green)'}},a.price&&!isCncl&&!isNS?cur(a.price):'\u2014'):null
             );
           }))
         )
@@ -712,9 +718,13 @@ function PatientModal(p){
         h('div',{style:{display:'flex',flexDirection:'column',gap:8}},tasks.map(function(t,i){
           var od=t.status==='pending'&&new Date(t.due_at)<new Date();
           var sc=taskStC[t.status]||'#3B82F6';
-          return h('div',{key:t.id||i,className:'card',style:{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,borderLeft:'3px solid '+sc}},
+          var isInactPM=t.status==='cancelled'||t.status==='failed';
+          return h('div',{key:t.id||i,className:'card',style:{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,
+            borderLeft:'4px solid '+sc,
+            background:t.status==='failed'?'rgba(244,63,94,.07)':t.status==='cancelled'?'rgba(100,116,139,.07)':t.status==='completed'||t.status==='manual_completed'?'rgba(34,197,94,.05)':'var(--card)',
+            opacity:isInactPM?0.6:1}},
             h('div',{style:{flex:1,minWidth:200}},
-              h('div',{style:{fontWeight:600,fontSize:14}},TASK_TYPE_LABELS[t.task_type]||t.task_type),
+              h('div',{style:{fontWeight:600,fontSize:14,textDecoration:t.status==='cancelled'?'line-through':'none',color:isInactPM?'var(--t3)':'var(--t1)'}},TASK_TYPE_LABELS[t.task_type]||t.task_type),
               t.reason?h('div',{style:{fontSize:12,color:'var(--t3)',marginTop:2}},t.reason):null,
               h('div',{style:{fontSize:12,marginTop:4}},h('span',{className:'badge',style:{background:sc+'25',color:sc}},taskStL[t.status]||t.status))
             ),
@@ -808,9 +818,13 @@ function T4(p){
       var od=t.status==='pending'&&new Date(t.due_at)<new Date();
       var isPending=t.status==='pending'||t.status==='executing';
       var sc=taskStC[t.status]||'#3B82F6';
-      return h('div',{key:t.id||t.task_id,className:'card',style:{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,borderLeft:'3px solid '+(od?'var(--rose)':sc)}},
+      var isInactT=t.status==='cancelled'||t.status==='failed';
+      return h('div',{key:t.id||t.task_id,className:'card',style:{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,
+        borderLeft:'4px solid '+(od?'var(--rose)':sc),
+        background:t.status==='failed'?'rgba(244,63,94,.07)':t.status==='cancelled'?'rgba(100,116,139,.07)':t.status==='completed'||t.status==='manual_completed'?'rgba(34,197,94,.05)':'var(--card)',
+        opacity:isInactT?0.6:1}},
         h('div',{style:{flex:1,minWidth:200}},
-          h('div',{style:{fontWeight:600,fontSize:14}},TASK_TYPE_LABELS[t.task_type]||t.task_type),
+          h('div',{style:{fontWeight:600,fontSize:14,textDecoration:t.status==='cancelled'?'line-through':'none',color:isInactT?'var(--t3)':'var(--t1)'}},TASK_TYPE_LABELS[t.task_type]||t.task_type),
           h('div',{style:{fontSize:13,color:'var(--t2)',marginTop:2}},
             h('span',{style:{cursor:'pointer',color:'var(--blue)',textDecoration:'underline'},onClick:function(e){e.stopPropagation();p.onOpenPatient(t.patient_id,t.patient_name)}},t.patient_name||'Desconhecido'),
             ' \u2022 ',t.patient_phone||''
@@ -860,10 +874,14 @@ function T5(){
     var canAct=['scheduled','confirmed','waiting','in_progress'].indexOf(a.status)>=0;
     var isConf=conf&&conf.id===a.id;
     var isBusy=cx===a.id;
-    return h('div',{key:a.id||i,style:{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:i<arr.length-1?'1px solid var(--bdr)':'none',flexWrap:'wrap'}},
-      h('div',{className:'mono',style:{fontSize:16,fontWeight:700,color:'var(--blue)',width:52,flexShrink:0}},(a.start_time||'').substring(0,5)),
+    var isDimR=['cancelled','no_show'].indexOf(a.status)>=0;
+    return h('div',{key:a.id||i,style:{display:'flex',alignItems:'center',gap:10,padding:'10px 0 10px 12px',borderBottom:i<arr.length-1?'1px solid var(--bdr)':'none',flexWrap:'wrap',
+      borderLeft:'3px solid '+c,
+      background:a.status==='cancelled'?'rgba(244,63,94,.06)':a.status==='no_show'?'rgba(245,158,11,.06)':a.status==='completed'?'rgba(34,197,94,.04)':'transparent',
+      opacity:isDimR?0.65:1,borderRadius:4}},
+      h('div',{className:'mono',style:{fontSize:16,fontWeight:700,color:isDimR?'var(--t3)':'var(--blue)',width:52,flexShrink:0}},(a.start_time||'').substring(0,5)),
       h('div',{style:{flex:1,minWidth:120}},
-        h('div',{style:{fontWeight:600,fontSize:14}},a.patient_name),
+        h('div',{style:{fontWeight:600,fontSize:14,textDecoration:isDimR?'line-through':'none'}},a.patient_name),
         h('div',{style:{fontSize:12,color:'var(--t3)'}},a.doctor_name+(a.service_name&&a.service_name!=='\u2014'?' \u2022 '+a.service_name:''))
       ),
       h('span',{className:'badge',style:{background:c+'25',color:c,flexShrink:0}},stL[a.status]||a.status),
@@ -905,8 +923,12 @@ function T5(){
         ag.upcoming.slice(0,25).map(function(a,i){
           var canCancel=['scheduled','confirmed','waiting'].indexOf(a.status)>=0;
           var isConf=conf&&conf.id===a.id;var isBusy=cx===a.id;
-          return h('div',{key:a.id||i,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid var(--bdr)',flexWrap:'wrap'}},
-            h('div',{style:{width:72,fontSize:12,color:'var(--t3)',flexShrink:0}},fd(a.appointment_date)),
+          var cu=stC[a.status]||'#3B82F6';var isDimU=['cancelled','no_show'].indexOf(a.status)>=0;
+          return h('div',{key:a.id||i,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0 8px 12px',borderBottom:'1px solid var(--bdr)',flexWrap:'wrap',
+            borderLeft:'3px solid '+cu,
+            background:a.status==='cancelled'?'rgba(244,63,94,.06)':a.status==='no_show'?'rgba(245,158,11,.06)':a.status==='completed'?'rgba(34,197,94,.04)':'transparent',
+            opacity:isDimU?0.65:1,borderRadius:4}},
+            h('div',{style:{width:72,fontSize:12,color:'var(--t3)',flexShrink:0,textDecoration:isDimU?'line-through':'none'}},fd(a.appointment_date)),
             h('div',{className:'mono',style:{width:42,fontSize:13,fontWeight:600,color:'var(--cyan)',flexShrink:0}},(a.start_time||'').substring(0,5)),
             h('div',{style:{flex:1,fontSize:13}},a.patient_name),
             h('div',{style:{fontSize:12,color:'var(--t3)',marginRight:4,flexShrink:0}},a.doctor_name),
