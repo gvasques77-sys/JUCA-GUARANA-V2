@@ -1,5 +1,5 @@
 -- =======================================================
--- JUCA GUARANA — Migrações v2 (Melhorias)
+-- CLINICORE — Migrações v2 (Melhorias)
 -- Data: 2026-03-02
 -- Executar no Supabase SQL Editor
 -- =======================================================

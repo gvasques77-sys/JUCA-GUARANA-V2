@@ -1,6 +1,6 @@
 // ============================================================
 // routes/financialRoutes.js — F10: API REST Financeira
-// JUCA GUARANA — GV AUTOMACOES
+// CLINICORE — GV AUTOMACOES
 // ============================================================
 // Todos os endpoints requerem autenticacao (authMiddleware aplicado no server.js).
 // req.clinicId e req.userId sao garantidos pelo middleware.

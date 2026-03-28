@@ -1,5 +1,5 @@
 -- =======================================================
--- JUCA GUARANA — Migração Multi-tenant + RLS
+-- CLINICORE — Migração Multi-tenant + RLS
 -- Ticket: JG-P0-006 + JG-P1-007
 -- Execute este script no Supabase SQL Editor
 -- =======================================================

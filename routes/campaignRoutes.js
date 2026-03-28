@@ -1,6 +1,6 @@
 // ============================================================
 // routes/campaignRoutes.js — F9D: API REST de Campanhas
-// JUCA GUARANA — GV AUTOMACOES
+// CLINICORE — GV AUTOMACOES
 // ============================================================
 // Todos os endpoints requerem autenticacao (authMiddleware aplicado no server.js).
 // req.clinicId e req.userId sao garantidos pelo middleware.

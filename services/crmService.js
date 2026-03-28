@@ -1,5 +1,5 @@
 /**
- * CRM V2 Service — Módulo Event-Centric para JUCA GUARANÁ
+ * CRM V2 Service — Módulo Event-Centric para CLINICORE
  * 
  * Arquitetura: Eventos imutáveis → Projeções derivadas → Tarefas
  * 

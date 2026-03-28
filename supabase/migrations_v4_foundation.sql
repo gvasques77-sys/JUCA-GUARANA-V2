@@ -1,5 +1,5 @@
 -- =======================================================
--- JUCA GUARANA — Migração v4: Foundation Fixes
+-- CLINICORE — Migração v4: Foundation Fixes
 -- Data: 2026-03-22
 -- Executar no Supabase SQL Editor
 -- =======================================================

@@ -1,6 +1,6 @@
 // ============================================================
 // services/financialService.js — F10: Inteligencia Financeira
-// JUCA GUARANA — GV AUTOMACOES
+// CLINICORE — GV AUTOMACOES
 // ============================================================
 // Multi-tenant: todas as funcoes recebem clinicId.
 // Usa service_role_key (bypass RLS).
@@ -543,13 +543,13 @@ export async function getHealthScore(clinicId) {
       else ocupacaoScore = 20;
     }
 
-    // 5. ROI Juca score (10%)
+    // 5. ROI Bot score (10%)
     var botPercent = overview.success ? overview.data.revenueBotPercent : 0;
-    var roiJucaScore;
-    if (botPercent > 50) roiJucaScore = 100;
-    else if (botPercent > 30) roiJucaScore = 80;
-    else if (botPercent > 10) roiJucaScore = 50;
-    else roiJucaScore = 20;
+    var roiBotScore;
+    if (botPercent > 50) roiBotScore = 100;
+    else if (botPercent > 30) roiBotScore = 80;
+    else if (botPercent > 10) roiBotScore = 50;
+    else roiBotScore = 20;
 
     if (botPercent > 50) alerts.push({ type: 'success', message: 'Receita do robo representa ' + botPercent + '% do faturamento — excelente ROI' });
 
@@ -576,7 +576,7 @@ export async function getHealthScore(clinicId) {
       (tendenciaScore * 0.25) +
       (cancelamentoScore * 0.20) +
       (ocupacaoScore * 0.15) +
-      (roiJucaScore * 0.10)
+      (roiBotScore * 0.10)
     );
 
     return {
@@ -588,7 +588,7 @@ export async function getHealthScore(clinicId) {
           tendencia: { score: tendenciaScore, weight: 0.25, value: Math.round(revDelta * 10) / 10 },
           cancelamento: { score: cancelamentoScore, weight: 0.20, value: Math.round(cancelRate * 10) / 10 },
           ocupacao: { score: ocupacaoScore, weight: 0.15 },
-          roiJuca: { score: roiJucaScore, weight: 0.10, value: botPercent }
+          roiBot: { score: roiBotScore, weight: 0.10, value: botPercent }
         },
         alerts: alerts
       }

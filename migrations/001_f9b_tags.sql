@@ -1,6 +1,6 @@
 -- ============================================================
 -- Migration 001 — F9B: Tags de Clínica e Pacientes
--- JUCA GUARANÁ — GV AUTOMAÇÕES
+-- CLINICORE — GV AUTOMAÇÕES
 -- Aplicada em: produção (Supabase edamtnxcwuuydwwbimvz)
 -- ============================================================
 

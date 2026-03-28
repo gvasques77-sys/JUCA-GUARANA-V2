@@ -1,6 +1,6 @@
 -- ============================================================
 -- Migration 002 — F9D: Campanhas WhatsApp Multi-Tenant
--- JUCA GUARANÁ — GV AUTOMAÇÕES
+-- CLINICORE — GV AUTOMAÇÕES
 -- Aplicada em: produção (Supabase edamtnxcwuuydwwbimvz)
 -- ============================================================
 

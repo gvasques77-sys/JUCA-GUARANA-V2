@@ -1,6 +1,6 @@
 // ============================================================
 // services/whatsappConfigHelper.js — Multi-Tenant WhatsApp Config
-// JUCA GUARANA — GV AUTOMACOES
+// CLINICORE — GV AUTOMACOES
 // ============================================================
 // Helper centralizado que TODOS os servicos de envio WhatsApp devem usar.
 // Fallback chain: banco -> env vars -> null (simulacao)

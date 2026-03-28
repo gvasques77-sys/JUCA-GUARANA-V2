@@ -1,6 +1,6 @@
 -- ============================================================
 -- Migration 003 — Tabela crm_segments (PENDENTE)
--- JUCA GUARANÁ — GV AUTOMAÇÕES
+-- CLINICORE — GV AUTOMAÇÕES
 --
 -- ATENÇÃO: Esta tabela NÃO existe no banco de produção.
 -- O código em campaignService.js referencia esta tabela com
