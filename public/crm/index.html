@@ -1404,23 +1404,236 @@ function hsBar(label,score,weight){
 }
 
 /* ===== CAMPAIGNS PAGE (F9D) ===== */
+var CAMP_ST={draft:{bg:'#334155',c:'#94A3B8',l:'Rascunho'},scheduled:{bg:'#1E3A5F',c:'#60A5FA',l:'Agendada'},sending:{bg:'#422006',c:'#FBBF24',l:'Enviando'},completed:{bg:'#052E16',c:'#4ADE80',l:'Conclu\u00edda'},cancelled:{bg:'#450A0A',c:'#F87171',l:'Cancelada'},failed:{bg:'#450A0A',c:'#F87171',l:'Falhou'}};
+function campBadge(st){var s=CAMP_ST[st]||CAMP_ST.draft;return h('span',{className:'badge',style:{background:s.bg,color:s.c,animation:st==='sending'?'pulse 2s infinite':'none'}},s.l)}
 function CampaignsPage(){
   var _v=us('list'),view=_v[0],sView=_v[1];
-  return h('div',{className:'fi'},
-    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:24}},
-      h('h2',{style:{fontSize:22,fontWeight:700}},'\uD83D\uDCE2 Campanhas'),
-      h('button',{className:'btn',style:{background:'linear-gradient(135deg,#0D9488 0%,#0EA5E9 100%)'},onClick:function(){sView('create')}},'\u002B Nova Campanha')
-    ),
-    view==='list'?h('div',{className:'card',style:{padding:'60px 24px',textAlign:'center'}},
-      h('div',{style:{fontSize:48,marginBottom:16}},'\uD83D\uDCE2'),
-      h('p',{style:{color:'var(--t2)',fontSize:16,marginBottom:8}},'Nenhuma campanha criada ainda.'),
-      h('p',{style:{color:'var(--t3)',fontSize:14}},'Crie sua primeira campanha WhatsApp para engajar pacientes.')
-    ):null,
-    view==='create'?h('div',{className:'card',style:{padding:'40px 24px',textAlign:'center'}},
-      h('p',{style:{color:'var(--t2)',fontSize:16}},'Formul\u00e1rio de cria\u00e7\u00e3o em breve...'),
-      h('button',{className:'btn',style:{marginTop:16},onClick:function(){sView('list')}},'Voltar')
-    ):null
-  );
+  var _c=us([]),camps=_c[0],sCamps=_c[1];
+  var _ld=us(true),ld=_ld[0],sLd=_ld[1];
+  var _f=us('all'),filt=_f[0],sFilt=_f[1];
+  var _sel=us(null),sel=_sel[0],sSel=_sel[1];
+  var _msgs=us([]),msgs=_msgs[0],sMsgs=_msgs[1];
+  var _mld=us(false),mld=_mld[0],sMld=_mld[1];
+  var _poll=ur(null);
+
+  function loadCamps(){
+    sLd(true);
+    q('/campaigns').then(function(d){
+      if(d&&Array.isArray(d))sCamps(d);
+      else if(d&&d.data)sCamps(d.data);
+      else sCamps([]);
+      sLd(false);
+    });
+  }
+
+  ue(function(){loadCamps();},[]);
+
+  // Polling: refresh every 10s if any campaign is sending
+  ue(function(){
+    var hasSending=camps.some(function(c){return c.status==='sending'});
+    if(_poll.current)clearInterval(_poll.current);
+    if(hasSending){_poll.current=setInterval(function(){loadCamps()},10000)}
+    return function(){if(_poll.current)clearInterval(_poll.current)};
+  },[camps]);
+
+  function openDetail(c){
+    sSel(c);sMld(true);sMsgs([]);sView('detail');
+    q('/campaigns/'+c.id+'/messages').then(function(d){
+      if(d&&Array.isArray(d))sMsgs(d);
+      else if(d&&d.data)sMsgs(d.data);
+      else sMsgs([]);
+      sMld(false);
+    });
+  }
+
+  function refreshDetail(id){
+    q('/campaigns/'+id).then(function(d){if(d)sSel(d)});
+    q('/campaigns/'+id+'/messages').then(function(d){
+      if(d&&Array.isArray(d))sMsgs(d);
+      else if(d&&d.data)sMsgs(d.data);
+    });
+  }
+
+  function deleteCamp(id){
+    if(!confirm('Deletar esta campanha?'))return;
+    q('/campaigns/'+id,{method:'DELETE'}).then(function(){loadCamps()});
+  }
+
+  function cancelCamp(id){
+    if(!confirm('Cancelar esta campanha?'))return;
+    q('/campaigns/'+id+'/cancel',{method:'POST'}).then(function(){
+      loadCamps();
+      if(sel&&sel.id===id)refreshDetail(id);
+    });
+  }
+
+  var filtered=filt==='all'?camps:camps.filter(function(c){return c.status===filt});
+  var filters=[
+    {id:'all',l:'Todas'},{id:'draft',l:'Rascunho'},{id:'scheduled',l:'Agendadas'},
+    {id:'sending',l:'Enviando'},{id:'completed',l:'Conclu\u00eddas'},{id:'cancelled',l:'Canceladas'}
+  ];
+
+  // === VIEW: LIST ===
+  if(view==='list'){
+    return h('div',{className:'fi'},
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}},
+        h('h2',{style:{fontSize:22,fontWeight:700}},'\uD83D\uDCE2 Campanhas'),
+        h('button',{className:'btn',style:{background:'linear-gradient(135deg,#0D9488 0%,#0EA5E9 100%)'},onClick:function(){sView('create')}},'\u002B Nova Campanha')
+      ),
+      h('div',{style:{display:'flex',gap:6,marginBottom:20,flexWrap:'wrap'}},filters.map(function(f){
+        return h('button',{key:f.id,style:{padding:'6px 14px',borderRadius:9999,fontSize:12,fontWeight:600,cursor:'pointer',border:filt===f.id?'1px solid var(--accent)':'1px solid var(--bdr)',background:filt===f.id?'rgba(59,130,246,.15)':'transparent',color:filt===f.id?'var(--accent)':'var(--t3)',fontFamily:'Inter',transition:'all .15s'},onClick:function(){sFilt(f.id)}},f.l);
+      })),
+      ld?h(Ld):
+      filtered.length===0?h('div',{className:'card',style:{padding:'60px 24px',textAlign:'center'}},
+        h('div',{style:{fontSize:48,marginBottom:16}},'\uD83D\uDCE2'),
+        h('p',{style:{color:'var(--t2)',fontSize:16,marginBottom:8}},'Nenhuma campanha encontrada.'),
+        h('p',{style:{color:'var(--t3)',fontSize:14}},'Crie sua primeira campanha WhatsApp para engajar pacientes.')
+      ):
+      h('div',{style:{display:'flex',flexDirection:'column',gap:12}},filtered.map(function(c){
+        var pct=c.total_recipients>0?Math.round(c.delivered_count/c.total_recipients*100):0;
+        return h('div',{key:c.id,className:'card',style:{padding:'16px 20px'}},
+          h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12,flexWrap:'wrap',gap:8}},
+            h('div',null,
+              h('div',{style:{display:'flex',alignItems:'center',gap:10,marginBottom:4}},
+                h('span',{style:{fontSize:16,fontWeight:700,color:'var(--t1)'}},c.name),
+                campBadge(c.status)
+              ),
+              h('div',{style:{fontSize:12,color:'var(--t3)'}},'Template: '+c.template_name+(c.scheduled_at?' \u2022 Agendada: '+fdt(c.scheduled_at):''))
+            ),
+            h('div',{style:{display:'flex',gap:6,flexShrink:0}},
+              h('button',{className:'btn',style:{fontSize:11,padding:'5px 12px'},onClick:function(){openDetail(c)}},'Ver Detalhes'),
+              c.status==='draft'?h('button',{className:'btnR',onClick:function(){deleteCamp(c.id)}},'Deletar'):null,
+              (c.status==='sending'||c.status==='scheduled')?h('button',{className:'btnAmber',onClick:function(){cancelCamp(c.id)}},'Cancelar'):null
+            )
+          ),
+          h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(100px,1fr))',gap:10}},
+            h('div',{style:{fontSize:11,color:'var(--t3)'}},h('span',{className:'mono',style:{fontSize:16,fontWeight:700,color:'var(--t1)'}},c.total_recipients||0),' destinat\u00e1rios'),
+            h('div',{style:{fontSize:11,color:'var(--t3)'}},h('span',{className:'mono',style:{fontSize:16,fontWeight:700,color:'var(--accent)'}},c.sent_count||0),' enviados'),
+            h('div',{style:{fontSize:11,color:'var(--t3)'}},h('span',{className:'mono',style:{fontSize:16,fontWeight:700,color:'var(--green)'}},c.delivered_count||0),' entregues'),
+            h('div',{style:{fontSize:11,color:'var(--t3)'}},h('span',{className:'mono',style:{fontSize:16,fontWeight:700,color:'var(--cyan)'}},c.read_count||0),' lidos'),
+            h('div',{style:{fontSize:11,color:'var(--t3)'}},h('span',{className:'mono',style:{fontSize:16,fontWeight:700,color:'var(--rose)'}},c.failed_count||0),' falhos')
+          ),
+          c.total_recipients>0?h('div',{style:{marginTop:10,height:6,borderRadius:3,background:'rgba(255,255,255,.06)',overflow:'hidden'}},
+            h('div',{style:{width:pct+'%',height:'100%',borderRadius:3,background:'linear-gradient(90deg,#0D9488,#0EA5E9)',transition:'width .6s ease'}})
+          ):null
+        );
+      }))
+    );
+  }
+
+  // === VIEW: DETAIL ===
+  if(view==='detail'&&sel){
+    var tot=sel.total_recipients||0;
+    var pSent=tot>0?Math.round((sel.sent_count||0)/tot*100):0;
+    var pDel=tot>0?Math.round((sel.delivered_count||0)/tot*100):0;
+    var pRead=tot>0?Math.round((sel.read_count||0)/tot*100):0;
+    var pFail=tot>0?Math.round((sel.failed_count||0)/tot*100):0;
+    return h('div',{className:'fi'},
+      h('button',{onClick:function(){sView('list');sSel(null)},style:{background:'none',border:'none',color:'var(--accent)',cursor:'pointer',fontSize:13,fontFamily:'Inter',marginBottom:16,display:'flex',alignItems:'center',gap:4}},'\u2190 Voltar para campanhas'),
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:8}},
+        h('div',{style:{display:'flex',alignItems:'center',gap:12}},
+          h('h2',{style:{fontSize:22,fontWeight:700}},sel.name),
+          campBadge(sel.status)
+        ),
+        (sel.status==='sending'||sel.status==='scheduled')?h('button',{className:'btnR',style:{fontSize:12,padding:'6px 14px'},onClick:function(){cancelCamp(sel.id)}},'Cancelar Campanha'):null
+      ),
+      sel.description?h('p',{style:{color:'var(--t2)',fontSize:14,marginBottom:16}},sel.description):null,
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:20}},
+        h('div',{className:'card fi',style:{padding:'20px 24px'}},
+          h('div',{className:'kpi-label'},'Total Destinat\u00e1rios'),
+          h('div',{className:'kpi-value',style:{color:'var(--accent)'}},tot)
+        ),
+        h('div',{className:'card fi',style:{padding:'20px 24px'}},
+          h('div',{className:'kpi-label'},'Enviados'),
+          h('div',{className:'kpi-value',style:{color:'#6E9FFF'}},sel.sent_count||0),
+          h('div',{style:{fontSize:11,color:'var(--t3)',marginTop:6}},pSent+'%')
+        ),
+        h('div',{className:'card fi',style:{padding:'20px 24px'}},
+          h('div',{className:'kpi-label'},'Entregues'),
+          h('div',{className:'kpi-value',style:{color:'#34D399'}},sel.delivered_count||0),
+          h('div',{style:{fontSize:11,color:'var(--t3)',marginTop:6}},pDel+'%')
+        ),
+        h('div',{className:'card fi',style:{padding:'20px 24px'}},
+          h('div',{className:'kpi-label'},'Lidos'),
+          h('div',{className:'kpi-value',style:{color:'#22D3EE'}},sel.read_count||0),
+          h('div',{style:{fontSize:11,color:'var(--t3)',marginTop:6}},pRead+'%')
+        ),
+        h('div',{className:'card fi',style:{padding:'20px 24px'}},
+          h('div',{className:'kpi-label'},'Falhos'),
+          h('div',{className:'kpi-value',style:{color:'#F43F5E'}},sel.failed_count||0),
+          h('div',{style:{fontSize:11,color:'var(--t3)',marginTop:6}},pFail+'%')
+        )
+      ),
+      h('div',{className:'card',style:{marginBottom:20,padding:'16px 20px'}},
+        h('h3',{style:{fontSize:14,fontWeight:600,marginBottom:12,color:'var(--t2)'}},'Funil de Entrega'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:8}},
+          h('div',{style:{display:'flex',alignItems:'center',gap:10,fontSize:12}},
+            h('span',{style:{width:70,color:'var(--t3)',flexShrink:0}},'Enviados'),
+            h('div',{style:{flex:1,height:8,borderRadius:4,background:'rgba(255,255,255,.06)',overflow:'hidden'}},
+              h('div',{className:'fbar',style:{width:pSent+'%',background:'linear-gradient(90deg,#3B82F6,#6E9FFF)'}})
+            ),
+            h('span',{className:'mono',style:{width:36,textAlign:'right',color:'var(--t2)',fontSize:11}},pSent+'%')
+          ),
+          h('div',{style:{display:'flex',alignItems:'center',gap:10,fontSize:12}},
+            h('span',{style:{width:70,color:'var(--t3)',flexShrink:0}},'Entregues'),
+            h('div',{style:{flex:1,height:8,borderRadius:4,background:'rgba(255,255,255,.06)',overflow:'hidden'}},
+              h('div',{className:'fbar',style:{width:pDel+'%',background:'linear-gradient(90deg,#10B981,#34D399)'}})
+            ),
+            h('span',{className:'mono',style:{width:36,textAlign:'right',color:'var(--t2)',fontSize:11}},pDel+'%')
+          ),
+          h('div',{style:{display:'flex',alignItems:'center',gap:10,fontSize:12}},
+            h('span',{style:{width:70,color:'var(--t3)',flexShrink:0}},'Lidos'),
+            h('div',{style:{flex:1,height:8,borderRadius:4,background:'rgba(255,255,255,.06)',overflow:'hidden'}},
+              h('div',{className:'fbar',style:{width:pRead+'%',background:'linear-gradient(90deg,#06B6D4,#22D3EE)'}})
+            ),
+            h('span',{className:'mono',style:{width:36,textAlign:'right',color:'var(--t2)',fontSize:11}},pRead+'%')
+          ),
+          h('div',{style:{display:'flex',alignItems:'center',gap:10,fontSize:12}},
+            h('span',{style:{width:70,color:'var(--t3)',flexShrink:0}},'Falhos'),
+            h('div',{style:{flex:1,height:8,borderRadius:4,background:'rgba(255,255,255,.06)',overflow:'hidden'}},
+              h('div',{className:'fbar',style:{width:pFail+'%',background:'linear-gradient(90deg,#E11D48,#F43F5E)'}})
+            ),
+            h('span',{className:'mono',style:{width:36,textAlign:'right',color:'var(--t2)',fontSize:11}},pFail+'%')
+          )
+        )
+      ),
+      h('div',{className:'card',style:{padding:0,overflow:'hidden'}},
+        h('div',{style:{padding:'16px 20px',borderBottom:'1px solid var(--bdr)'}},
+          h('h3',{style:{fontSize:14,fontWeight:600,color:'var(--t2)'}},'Mensagens ('+msgs.length+')')
+        ),
+        mld?h('div',{style:{padding:20}},h(Ld)):
+        msgs.length===0?h('div',{style:{padding:'40px 20px',textAlign:'center'}},h(Em,{m:'Nenhuma mensagem ainda',i:'\uD83D\uDCE8'})):
+        h('table',null,
+          h('thead',null,h('tr',null,
+            h('th',null,'Paciente'),h('th',null,'Telefone'),h('th',null,'Status'),h('th',null,'Hor\u00e1rio')
+          )),
+          h('tbody',null,msgs.map(function(m){
+            var mst=CAMP_ST[m.status]||{bg:'#334155',c:'#94A3B8',l:m.status};
+            return h('tr',{key:m.id,className:'trow'},
+              h('td',{style:{fontWeight:500}},m.patient_name||m.patient_id||'\u2014'),
+              h('td',{className:'mono',style:{fontSize:12,color:'var(--t2)'}},m.phone||'\u2014'),
+              h('td',null,h('span',{className:'badge',style:{background:mst.bg,color:mst.c}},mst.l)),
+              h('td',{style:{fontSize:12,color:'var(--t3)'}},m.sent_at?fdt(m.sent_at):m.created_at?fdt(m.created_at):'\u2014')
+            );
+          }))
+        )
+      )
+    );
+  }
+
+  // === VIEW: CREATE (placeholder) ===
+  if(view==='create'){
+    return h('div',{className:'fi'},
+      h('button',{onClick:function(){sView('list')},style:{background:'none',border:'none',color:'var(--accent)',cursor:'pointer',fontSize:13,fontFamily:'Inter',marginBottom:16}},'\u2190 Voltar'),
+      h('div',{className:'card',style:{padding:'60px 24px',textAlign:'center'}},
+        h('div',{style:{fontSize:48,marginBottom:16}},'\u2709\uFE0F'),
+        h('p',{style:{color:'var(--t2)',fontSize:16}},'Formul\u00e1rio de cria\u00e7\u00e3o em desenvolvimento...'),
+        h('p',{style:{color:'var(--t3)',fontSize:13,marginTop:8}},'Dispon\u00edvel na pr\u00f3xima atualiza\u00e7\u00e3o.')
+      )
+    );
+  }
+
+  return null;
 }
 
 /* ===== APP ===== */
