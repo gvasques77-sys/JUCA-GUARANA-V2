@@ -18,6 +18,8 @@ import { startTaskProcessor } from './services/taskProcessor.js';
 import { createCrmApiRouter } from './routes/crmDashboardRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
 import { startCampaignScheduler } from './services/campaignService.js';
+import financialRoutes from './routes/financialRoutes.js';
+import { authMiddleware } from './middleware/authMiddleware.js';
 
 
 
@@ -295,7 +297,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+
+// CORS — restrito via ALLOWED_ORIGINS (CSV), fallback para '*' se não configurado
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : null;
+app.use(cors(allowedOrigins ? { origin: allowedOrigins, credentials: true } : {}));
 
 // ── LOG GLOBAL DE ENTRADA ────────────────────────────────────────────────
 // Loga TODA requisição que chega ao servidor antes de qualquer middleware.
@@ -366,8 +373,10 @@ const supabase = createClient(
 );
 
 // — F9D: Campaign API (must be before generic CRM routes) —
-import { authMiddleware } from './middleware/authMiddleware.js';
 app.use('/crm/api/campaigns', authMiddleware(supabase), campaignRoutes);
+
+// — F10: Financial Intelligence API —
+app.use('/crm/api/financial', authMiddleware(supabase), financialRoutes);
 
 // — CRM Dashboard API (montada aqui porque depende do supabase client) —
 app.use('/crm/api', createCrmApiRouter(supabase));
