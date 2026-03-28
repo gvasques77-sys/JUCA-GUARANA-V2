@@ -1,5 +1,5 @@
 -- =======================================================
--- JUCA GUARANA — Migração v3: Lock Atômico via state_json
+-- CLINICORE — Migração v3: Lock Atômico via state_json
 -- Data: 2026-03-02
 -- Executar no Supabase SQL Editor
 -- =======================================================

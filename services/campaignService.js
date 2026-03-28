@@ -1,6 +1,6 @@
 // ============================================================
 // services/campaignService.js — F9D: Campanhas WhatsApp
-// JUCA GUARANA — GV AUTOMACOES
+// CLINICORE — GV AUTOMACOES
 // ============================================================
 // VERSAO MULTI-TENANT: credenciais WhatsApp por clinica.
 // Usa whatsappConfigHelper.js para resolver credentials.

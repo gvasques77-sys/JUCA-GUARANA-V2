@@ -1,6 +1,6 @@
 -- ============================================================
 -- Migration 004 — Correções do Code Review (Codex)
--- JUCA GUARANÁ — GV AUTOMAÇÕES
+-- CLINICORE — GV AUTOMAÇÕES
 -- Criada em: 2026-03-27
 -- Status: PENDENTE DE APLICAÇÃO MANUAL via Supabase Studio
 -- ============================================================
