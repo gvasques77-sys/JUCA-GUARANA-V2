@@ -643,7 +643,8 @@ export function createCrmApiRouter(supabase) {
         return res.json({ success: true, message: 'Tarefa já finalizada', task });
       }
 
-      const update = { status, executed_at: new Date().toISOString() };
+      const update = { status, updated_at: new Date().toISOString() };
+      if (status === 'manual_completed') update.executed_at = new Date().toISOString();
 
       // BUG-07 fix: incluir clinic_id na query de escrita como defesa em profundidade
       const { data: updated, error: updateErr } = await supabase
@@ -1049,12 +1050,16 @@ export function createCrmApiRouter(supabase) {
         churn_alerts: churn_alerts,
       };
 
-      // Staff não vê dados financeiros
+      // Staff não vê dados financeiros nem telefones de pacientes (LGPD)
       if (req.userRole !== 'owner') {
         result.resumo.receita_bruta = undefined;
         result.resumo.receita_efetiva = undefined;
         result.resumo.ticket_medio = undefined;
         result.ranking_medicos = result.ranking_medicos.map(m => ({ ...m, receita: undefined }));
+        result.churn_alerts = result.churn_alerts.map(function(a) {
+          var { phone, ...rest } = a;
+          return rest;
+        });
       }
 
       return res.json(result);
