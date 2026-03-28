@@ -1403,6 +1403,26 @@ function hsBar(label,score,weight){
   );
 }
 
+/* ===== CAMPAIGNS PAGE (F9D) ===== */
+function CampaignsPage(){
+  var _v=us('list'),view=_v[0],sView=_v[1];
+  return h('div',{className:'fi'},
+    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:24}},
+      h('h2',{style:{fontSize:22,fontWeight:700}},'\uD83D\uDCE2 Campanhas'),
+      h('button',{className:'btn',style:{background:'linear-gradient(135deg,#0D9488 0%,#0EA5E9 100%)'},onClick:function(){sView('create')}},'\u002B Nova Campanha')
+    ),
+    view==='list'?h('div',{className:'card',style:{padding:'60px 24px',textAlign:'center'}},
+      h('div',{style:{fontSize:48,marginBottom:16}},'\uD83D\uDCE2'),
+      h('p',{style:{color:'var(--t2)',fontSize:16,marginBottom:8}},'Nenhuma campanha criada ainda.'),
+      h('p',{style:{color:'var(--t3)',fontSize:14}},'Crie sua primeira campanha WhatsApp para engajar pacientes.')
+    ):null,
+    view==='create'?h('div',{className:'card',style:{padding:'40px 24px',textAlign:'center'}},
+      h('p',{style:{color:'var(--t2)',fontSize:16}},'Formul\u00e1rio de cria\u00e7\u00e3o em breve...'),
+      h('button',{className:'btn',style:{marginTop:16},onClick:function(){sView('list')}},'Voltar')
+    ):null
+  );
+}
+
 /* ===== APP ===== */
 function App(){
   var _p=us('overview'),pg=_p[0],sP=_p[1];
@@ -1495,7 +1515,8 @@ function App(){
     {id:'tasks',l:'Tarefas',i:'\u2705',badge:pendingTasks>0?pendingTasks:null},
     {id:'agenda',l:'Agenda',i:'\uD83D\uDCC5'},
     {id:'financial',l:'Financeiro',i:'\uD83D\uDCB0'},
-    {id:'report',l:'Relat\u00f3rio',i:'\uD83D\uDCDD'}
+    {id:'report',l:'Relat\u00f3rio',i:'\uD83D\uDCDD'},
+    {id:'campaigns',l:'Campanhas',i:'\uD83D\uDCE2'}
   ];
 
   return h('div',null,
@@ -1575,6 +1596,7 @@ function App(){
         h('div',{style:{display:pg==='agenda'?'block':'none'}},h(T5)),
         h('div',{style:{display:pg==='financial'?'block':'none'}},h(FinancialPage,{role:role})),
         h('div',{style:{display:pg==='report'?'block':'none'}},h(T6,{role:role})),
+        h('div',{style:{display:pg==='campaigns'?'block':'none'}},h(CampaignsPage)),
         pg==='timeline'&&sel?h(T3,{pid:sel.id,pn:sel.n,onBack:function(){sP('patients')}}):null
       )
     )
