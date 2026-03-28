@@ -1218,10 +1218,6 @@ function FinancialPage(p){
           h('div',{style:{fontSize:11,color:'var(--t3)',marginTop:6}},(fov?fov.totalCancellations:0)+' cancelamentos')
         ),
         h('div',{className:'card fi',style:{padding:'20px 24px'}},
-          h('div',{className:'kpi-label'},'Custo IA'),
-          h('div',{className:'kpi-value',style:{color:'#06B6D4'}},cur(fov?fov.aiCost:0))
-        ),
-        h('div',{className:'card fi',style:{padding:'20px 24px'}},
           h('div',{className:'kpi-label'},'Lucro Estimado'),
           h('div',{className:'kpi-value',style:{color:fov&&(fov.totalRevenue-fov.aiCost)>0?'#34D399':'#F43F5E'}},cur(fov?(fov.totalRevenue-(fov.aiCost||0)):0))
         )
@@ -1301,7 +1297,7 @@ function FinancialPage(p){
             dreRow('(-) Impostos ('+dre.taxRate+'%)',dre.impostos,'#F43F5E'),
             dreRow('(-) Taxa Cart\u00e3o ('+dre.cardFeeRate+'%)',dre.taxaCartao,'#F43F5E'),
             dreRow('(-) Custos Operacionais',dre.custosOperacionais,'#FBBF24'),
-            dreRow('(-) Custo IA',dre.custoIA,'#06B6D4'),
+
             h('div',{style:{borderTop:'2px solid var(--bdr)',paddingTop:12,marginTop:4}}),
             dreRow('= LUCRO L\u00cdQUIDO',dre.lucroLiquido,dre.lucroLiquido>=0?'#34D399':'#F43F5E',true),
             dreRow('Margem',dre.margem+'%',dre.margem>=20?'#34D399':dre.margem>=0?'#FBBF24':'#F43F5E')
