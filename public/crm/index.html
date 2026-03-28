@@ -1415,6 +1415,23 @@ function CampaignsPage(){
   var _msgs=us([]),msgs=_msgs[0],sMsgs=_msgs[1];
   var _mld=us(false),mld=_mld[0],sMld=_mld[1];
   var _poll=ur(null);
+  // Form states
+  var _fs=us(1),fStep=_fs[0],sFStep=_fs[1];
+  var _fd=us({name:'',description:'',template_name:'',template_language:'pt_BR'}),fData=_fd[0],sFData=_fd[1];
+  var _at=us('tags'),audType=_at[0],sAudType=_at[1];
+  var _atags=us([]),avTags=_atags[0],sAvTags=_atags[1];
+  var _stids=us([]),selTagIds=_stids[0],sSelTagIds=_stids[1];
+  var _pts=us([]),allPats=_pts[0],sAllPats=_pts[1];
+  var _spids=us([]),selPatIds=_spids[0],sSelPatIds=_spids[1];
+  var _ap=us([]),audPats=_ap[0],sAudPats=_ap[1];
+  var _psrch=us(''),patSrch=_psrch[0],sPatSrch=_psrch[1];
+  var _scht=us('now'),schedType=_scht[0],sSchedType=_scht[1];
+  var _schd=us(''),schedDate=_schd[0],sSchedDate=_schd[1];
+  var _schtm=us(''),schedTime=_schtm[0],sSchedTime=_schtm[1];
+  var _sav=us(false),saving=_sav[0],sSaving=_sav[1];
+
+  function resetForm(){sFStep(1);sFData({name:'',description:'',template_name:'',template_language:'pt_BR'});sAudType('tags');sSelTagIds([]);sSelPatIds([]);sAudPats([]);sPatSrch('');sSchedType('now');sSchedDate('');sSchedTime('')}
+  function goCreate(){resetForm();sView('create')}
 
   function loadCamps(){
     sLd(true);
@@ -1478,7 +1495,7 @@ function CampaignsPage(){
     return h('div',{className:'fi'},
       h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}},
         h('h2',{style:{fontSize:22,fontWeight:700}},'\uD83D\uDCE2 Campanhas'),
-        h('button',{className:'btn',style:{background:'linear-gradient(135deg,#0D9488 0%,#0EA5E9 100%)'},onClick:function(){sView('create')}},'\u002B Nova Campanha')
+        h('button',{className:'btn',style:{background:'linear-gradient(135deg,#0D9488 0%,#0EA5E9 100%)'},onClick:goCreate},'\u002B Nova Campanha')
       ),
       h('div',{style:{display:'flex',gap:6,marginBottom:20,flexWrap:'wrap'}},filters.map(function(f){
         return h('button',{key:f.id,style:{padding:'6px 14px',borderRadius:9999,fontSize:12,fontWeight:600,cursor:'pointer',border:filt===f.id?'1px solid var(--accent)':'1px solid var(--bdr)',background:filt===f.id?'rgba(59,130,246,.15)':'transparent',color:filt===f.id?'var(--accent)':'var(--t3)',fontFamily:'Inter',transition:'all .15s'},onClick:function(){sFilt(f.id)}},f.l);
@@ -1621,15 +1638,220 @@ function CampaignsPage(){
     );
   }
 
-  // === VIEW: CREATE (placeholder) ===
+  // === VIEW: CREATE ===
   if(view==='create'){
+    function cancelCreate(){resetForm();sView('list')}
+
+    // Load tags and patients when entering create view
+    ue(function(){
+      if(view==='create'){
+        q('/tags').then(function(d){if(d&&Array.isArray(d))sAvTags(d);else if(d&&d.data)sAvTags(d.data);else sAvTags([])});
+        q('/patients').then(function(d){if(d&&Array.isArray(d))sAllPats(d);else if(d&&d.data)sAllPats(d.data);else sAllPats([])});
+      }
+    },[view]);
+
+    // Resolve audience patients when tags change
+    ue(function(){
+      if(audType==='tags'&&selTagIds.length>0){
+        q('/patients').then(function(d){
+          var pts=d&&Array.isArray(d)?d:(d&&d.data?d.data:[]);
+          var matched=pts.filter(function(p){
+            if(!p.tags||!Array.isArray(p.tags))return false;
+            return p.tags.some(function(t){return selTagIds.indexOf(t.id||t.tag_id)>=0});
+          });
+          sAudPats(matched);
+          sSelPatIds(matched.map(function(p){return p.id}));
+        });
+      }else if(audType==='tags'){sAudPats([]);sSelPatIds([])}
+    },[selTagIds,audType]);
+
+    // Resolve audience for manual selection
+    ue(function(){
+      if(audType==='manual'){
+        var matched=allPats.filter(function(p){return selPatIds.indexOf(p.id)>=0});
+        sAudPats(matched);
+      }
+    },[selPatIds,audType,allPats]);
+
+    function toggleTag(tid){
+      var idx=selTagIds.indexOf(tid);
+      if(idx>=0){sSelTagIds(selTagIds.filter(function(x){return x!==tid}))}
+      else{sSelTagIds(selTagIds.concat([tid]))}
+    }
+
+    function togglePat(pid){
+      var idx=selPatIds.indexOf(pid);
+      if(idx>=0){sSelPatIds(selPatIds.filter(function(x){return x!==pid}))}
+      else{sSelPatIds(selPatIds.concat([pid]))}
+    }
+
+    function saveCampaign(andSend){
+      if(!fData.name||!fData.template_name){alert('Preencha nome e template.');return}
+      if(audPats.length===0){alert('Selecione pelo menos 1 destinat\u00e1rio.');return}
+      if(andSend&&schedType==='scheduled'&&(!schedDate||!schedTime)){alert('Preencha data e hora do agendamento.');return}
+      sSaving(true);
+      var schedAt=schedType==='scheduled'?schedDate+'T'+schedTime+':00':null;
+      var body={
+        name:fData.name,
+        description:fData.description,
+        template_name:fData.template_name,
+        template_language:fData.template_language,
+        template_components:[],
+        audience_snapshot:{type:audType,tag_ids:selTagIds,patient_ids:selPatIds,patients:audPats.map(function(p){return{id:p.id,name:p.name,phone:p.phone}})},
+        total_recipients:audPats.length,
+        scheduled_at:schedAt
+      };
+      q('/campaigns',{method:'POST',body:JSON.stringify(body)}).then(function(r){
+        if(!r||r.error){alert('Erro ao salvar: '+(r&&r.error||'tente novamente'));sSaving(false);return}
+        var cid=r.id||r.data&&r.data.id;
+        if(andSend&&cid){
+          q('/campaigns/'+cid+'/send',{method:'POST'}).then(function(){
+            sSaving(false);resetForm();loadCamps();sView('list');
+          });
+        }else{
+          sSaving(false);resetForm();loadCamps();sView('list');
+        }
+      });
+    }
+
+    var stepLabel=fStep===1?'Informa\u00e7\u00f5es B\u00e1sicas':fStep===2?'Selecionar Audi\u00eancia':'Agendamento';
+    var filteredPats=allPats.filter(function(p){
+      if(!patSrch)return true;
+      var s=patSrch.toLowerCase();
+      return(p.name&&p.name.toLowerCase().indexOf(s)>=0)||(p.phone&&p.phone.indexOf(s)>=0);
+    });
+
     return h('div',{className:'fi'},
-      h('button',{onClick:function(){sView('list')},style:{background:'none',border:'none',color:'var(--accent)',cursor:'pointer',fontSize:13,fontFamily:'Inter',marginBottom:16}},'\u2190 Voltar'),
-      h('div',{className:'card',style:{padding:'60px 24px',textAlign:'center'}},
-        h('div',{style:{fontSize:48,marginBottom:16}},'\u2709\uFE0F'),
-        h('p',{style:{color:'var(--t2)',fontSize:16}},'Formul\u00e1rio de cria\u00e7\u00e3o em desenvolvimento...'),
-        h('p',{style:{color:'var(--t3)',fontSize:13,marginTop:8}},'Dispon\u00edvel na pr\u00f3xima atualiza\u00e7\u00e3o.')
-      )
+      h('button',{onClick:cancelCreate,style:{background:'none',border:'none',color:'var(--accent)',cursor:'pointer',fontSize:13,fontFamily:'Inter',marginBottom:16,display:'flex',alignItems:'center',gap:4}},'\u2190 Voltar para campanhas'),
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}},
+        h('h2',{style:{fontSize:22,fontWeight:700}},'\u2709\uFE0F Nova Campanha'),
+        h('span',{style:{fontSize:13,color:'var(--t3)'}},'Passo '+fStep+' de 3 \u2014 '+stepLabel)
+      ),
+      // Progress bar
+      h('div',{style:{height:4,borderRadius:2,background:'rgba(255,255,255,.06)',marginBottom:24,overflow:'hidden'}},
+        h('div',{style:{width:Math.round(fStep/3*100)+'%',height:'100%',borderRadius:2,background:'linear-gradient(90deg,#0D9488,#0EA5E9)',transition:'width .3s ease'}})
+      ),
+
+      // === STEP 1 ===
+      fStep===1?h('div',{className:'card',style:{padding:'24px'}},
+        h('div',{style:{marginBottom:16}},
+          h('label',{style:{display:'block',fontSize:11,color:'var(--t3)',marginBottom:4,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em'}},'Nome da Campanha *'),
+          h('input',{type:'text',value:fData.name,placeholder:'Ex: Campanha de Reativa\u00e7\u00e3o Mar\u00e7o',style:{width:'100%'},onChange:function(e){sFData(Object.assign({},fData,{name:e.target.value}))}})
+        ),
+        h('div',{style:{marginBottom:16}},
+          h('label',{style:{display:'block',fontSize:11,color:'var(--t3)',marginBottom:4,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em'}},'Descri\u00e7\u00e3o (opcional)'),
+          h('textarea',{value:fData.description,placeholder:'Descreva o objetivo da campanha...',style:{width:'100%'},onChange:function(e){sFData(Object.assign({},fData,{description:e.target.value}))}})
+        ),
+        h('div',{className:'form-row'},
+          h('div',null,
+            h('label',null,'Template Name *'),
+            h('input',{type:'text',value:fData.template_name,placeholder:'nome_do_template_meta',onChange:function(e){sFData(Object.assign({},fData,{template_name:e.target.value}))}})
+          ),
+          h('div',null,
+            h('label',null,'Idioma'),
+            h('select',{value:fData.template_language,onChange:function(e){sFData(Object.assign({},fData,{template_language:e.target.value}))}},
+              h('option',{value:'pt_BR'},'Portugu\u00eas (BR)'),
+              h('option',{value:'en_US'},'English (US)'),
+              h('option',{value:'es'},'Espa\u00f1ol')
+            )
+          )
+        ),
+        h('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20}},
+          h('button',{onClick:cancelCreate,style:{padding:'8px 18px',borderRadius:8,border:'1px solid var(--bdr)',background:'none',color:'var(--t2)',cursor:'pointer',fontFamily:'Inter',fontSize:13}},'Cancelar'),
+          h('button',{className:'btn',onClick:function(){if(!fData.name||!fData.template_name){alert('Preencha nome e template.');return}sFStep(2)}},'Pr\u00f3ximo \u2192')
+        )
+      ):null,
+
+      // === STEP 2 ===
+      fStep===2?h('div',{className:'card',style:{padding:'24px'}},
+        h('div',{style:{display:'flex',gap:6,marginBottom:20}},
+          h('button',{style:{padding:'8px 16px',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',border:audType==='tags'?'1px solid var(--accent)':'1px solid var(--bdr)',background:audType==='tags'?'rgba(59,130,246,.15)':'transparent',color:audType==='tags'?'var(--accent)':'var(--t3)',fontFamily:'Inter'},onClick:function(){sAudType('tags');sSelPatIds([]);sAudPats([])}},'Por Tags'),
+          h('button',{style:{padding:'8px 16px',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',border:audType==='manual'?'1px solid var(--accent)':'1px solid var(--bdr)',background:audType==='manual'?'rgba(59,130,246,.15)':'transparent',color:audType==='manual'?'var(--accent)':'var(--t3)',fontFamily:'Inter'},onClick:function(){sAudType('manual');sSelTagIds([]);sAudPats([]);sSelPatIds([])}},'Sele\u00e7\u00e3o Manual')
+        ),
+
+        // Tags mode
+        audType==='tags'?h('div',null,
+          avTags.length===0?h('p',{style:{color:'var(--t3)',fontSize:13}},'Nenhuma tag encontrada.'):
+          h('div',{style:{display:'flex',flexWrap:'wrap',gap:8,marginBottom:16}},avTags.map(function(t){
+            var isOn=selTagIds.indexOf(t.id)>=0;
+            return h('button',{key:t.id,style:{padding:'6px 14px',borderRadius:9999,fontSize:12,fontWeight:600,cursor:'pointer',border:'1px solid '+(isOn?t.color||'var(--accent)':'var(--bdr)'),background:isOn?(t.color||'var(--accent)')+'22':'transparent',color:isOn?t.color||'var(--accent)':'var(--t3)',fontFamily:'Inter',transition:'all .15s'},onClick:function(){toggleTag(t.id)}},t.name);
+          })),
+          h('div',{style:{padding:'12px 16px',background:'rgba(59,130,246,.05)',borderRadius:10,border:'1px solid var(--bdr)',fontSize:13}},
+            h('span',{style:{color:'var(--t2)'}},audPats.length+' paciente'+(audPats.length!==1?'s':'')+' selecionado'+(audPats.length!==1?'s':'')),
+            audPats.length>0?h('div',{style:{marginTop:8,display:'flex',flexWrap:'wrap',gap:4}},audPats.slice(0,10).map(function(p){
+              return h('span',{key:p.id,style:{fontSize:11,padding:'2px 8px',borderRadius:6,background:'rgba(255,255,255,.06)',color:'var(--t3)'}},p.name);
+            }),audPats.length>10?h('span',{style:{fontSize:11,color:'var(--t3)'}},'... e mais '+(audPats.length-10)):null):null
+          )
+        ):null,
+
+        // Manual mode
+        audType==='manual'?h('div',null,
+          h('div',{style:{marginBottom:12}},
+            h('input',{type:'text',value:patSrch,placeholder:'Buscar por nome ou telefone...',style:{width:'100%'},onChange:function(e){sPatSrch(e.target.value)}})
+          ),
+          h('div',{style:{display:'flex',gap:8,marginBottom:12}},
+            h('button',{style:{fontSize:11,color:'var(--accent)',background:'none',border:'none',cursor:'pointer',fontFamily:'Inter',fontWeight:600},onClick:function(){sSelPatIds(allPats.map(function(p){return p.id}))}},'Selecionar todos'),
+            h('button',{style:{fontSize:11,color:'var(--t3)',background:'none',border:'none',cursor:'pointer',fontFamily:'Inter',fontWeight:600},onClick:function(){sSelPatIds([])}},'Limpar sele\u00e7\u00e3o')
+          ),
+          h('div',{style:{maxHeight:300,overflowY:'auto',border:'1px solid var(--bdr)',borderRadius:10}},
+            filteredPats.length===0?h('p',{style:{padding:20,textAlign:'center',color:'var(--t3)',fontSize:13}},'Nenhum paciente encontrado.'):
+            filteredPats.map(function(p){
+              var isOn=selPatIds.indexOf(p.id)>=0;
+              return h('div',{key:p.id,style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderBottom:'1px solid var(--bdr)',cursor:'pointer',background:isOn?'rgba(59,130,246,.06)':'transparent',transition:'background .12s'},onClick:function(){togglePat(p.id)}},
+                h('div',{style:{width:18,height:18,borderRadius:4,border:isOn?'2px solid var(--accent)':'2px solid var(--bdr)',background:isOn?'var(--accent)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}},
+                  isOn?h('svg',{width:10,height:10,viewBox:'0 0 12 12'},h('path',{d:'M2 6l3 3 5-5',stroke:'#fff',strokeWidth:2,fill:'none',strokeLinecap:'round'})):null
+                ),
+                h('div',{style:{flex:1,minWidth:0}},
+                  h('div',{style:{fontSize:13,fontWeight:500,color:'var(--t1)'}},p.name||'\u2014'),
+                  h('div',{className:'mono',style:{fontSize:11,color:'var(--t3)'}},p.phone||'Sem telefone')
+                )
+              );
+            })
+          ),
+          h('div',{style:{marginTop:12,padding:'12px 16px',background:'rgba(59,130,246,.05)',borderRadius:10,border:'1px solid var(--bdr)',fontSize:13,color:'var(--t2)'}},selPatIds.length+' paciente'+(selPatIds.length!==1?'s':'')+' selecionado'+(selPatIds.length!==1?'s':''))
+        ):null,
+
+        h('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20}},
+          h('button',{onClick:function(){sFStep(1)},style:{padding:'8px 18px',borderRadius:8,border:'1px solid var(--bdr)',background:'none',color:'var(--t2)',cursor:'pointer',fontFamily:'Inter',fontSize:13}},'\u2190 Anterior'),
+          h('button',{className:'btn',onClick:function(){if(audPats.length===0){alert('Selecione pelo menos 1 destinat\u00e1rio.');return}sFStep(3)}},'Pr\u00f3ximo \u2192')
+        )
+      ):null,
+
+      // === STEP 3 ===
+      fStep===3?h('div',{className:'card',style:{padding:'24px'}},
+        h('div',{style:{marginBottom:20}},
+          h('div',{style:{fontSize:14,fontWeight:600,color:'var(--t2)',marginBottom:12}},'Quando enviar?'),
+          h('div',{style:{display:'flex',gap:8}},
+            h('button',{style:{padding:'10px 20px',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',border:schedType==='now'?'1px solid var(--green)':'1px solid var(--bdr)',background:schedType==='now'?'rgba(52,211,153,.12)':'transparent',color:schedType==='now'?'var(--green)':'var(--t3)',fontFamily:'Inter'},onClick:function(){sSchedType('now')}},'Enviar Agora'),
+            h('button',{style:{padding:'10px 20px',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',border:schedType==='scheduled'?'1px solid var(--accent)':'1px solid var(--bdr)',background:schedType==='scheduled'?'rgba(59,130,246,.12)':'transparent',color:schedType==='scheduled'?'var(--accent)':'var(--t3)',fontFamily:'Inter'},onClick:function(){sSchedType('scheduled')}},'Agendar')
+          )
+        ),
+        schedType==='scheduled'?h('div',{className:'form-row',style:{marginBottom:20}},
+          h('div',null,
+            h('label',null,'Data'),
+            h('input',{type:'date',value:schedDate,onChange:function(e){sSchedDate(e.target.value)}})
+          ),
+          h('div',null,
+            h('label',null,'Hora'),
+            h('input',{type:'time',value:schedTime,onChange:function(e){sSchedTime(e.target.value)}})
+          )
+        ):null,
+        h('div',{style:{padding:'16px 20px',background:'rgba(59,130,246,.05)',borderRadius:10,border:'1px solid var(--bdr)',marginBottom:20}},
+          h('div',{style:{fontSize:13,fontWeight:600,color:'var(--t2)',marginBottom:8}},'Resumo da Campanha'),
+          h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:13}},
+            h('div',{style:{color:'var(--t3)'}},'Nome:'),h('div',{style:{color:'var(--t1)',fontWeight:500}},fData.name),
+            h('div',{style:{color:'var(--t3)'}},'Template:'),h('div',{style:{color:'var(--t1)',fontWeight:500}},fData.template_name),
+            h('div',{style:{color:'var(--t3)'}},'Idioma:'),h('div',{style:{color:'var(--t1)',fontWeight:500}},fData.template_language),
+            h('div',{style:{color:'var(--t3)'}},'Destinat\u00e1rios:'),h('div',{className:'mono',style:{color:'var(--accent)',fontWeight:700}},audPats.length),
+            h('div',{style:{color:'var(--t3)'}},'Envio:'),h('div',{style:{color:'var(--t1)',fontWeight:500}},schedType==='now'?'Imediato':'Agendado: '+schedDate+' '+schedTime)
+          )
+        ),
+        h('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',flexWrap:'wrap'}},
+          h('button',{onClick:function(){sFStep(2)},style:{padding:'8px 18px',borderRadius:8,border:'1px solid var(--bdr)',background:'none',color:'var(--t2)',cursor:'pointer',fontFamily:'Inter',fontSize:13}},'\u2190 Anterior'),
+          h('button',{onClick:function(){saveCampaign(false)},disabled:saving,style:{padding:'8px 18px',borderRadius:8,border:'1px solid var(--bdr)',background:'rgba(255,255,255,.05)',color:'var(--t1)',cursor:'pointer',fontFamily:'Inter',fontSize:13,fontWeight:600}},saving?'Salvando...':'Salvar como Rascunho'),
+          h('button',{className:'btn',style:{background:'linear-gradient(135deg,#0D9488 0%,#0EA5E9 100%)'},onClick:function(){saveCampaign(true)},disabled:saving},saving?'Enviando...':(schedType==='scheduled'?'Agendar Envio':'Enviar Agora'))
+        )
+      ):null
     );
   }
 
