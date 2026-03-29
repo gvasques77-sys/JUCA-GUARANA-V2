@@ -8,6 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { getClinicWhatsAppConfig, getThrottleConfig } from './whatsappConfigHelper.js';
+import { trackTemplateUsage } from './usageTracker.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -196,10 +197,25 @@ export async function executeCampaign(campaignId) {
     let sentCount = 0, failedCount = 0;
     for (let i = 0; i < messages.length; i += throttle.batchSize) {
       const batch = messages.slice(i, i + throttle.batchSize);
-      const results = await Promise.allSettled(batch.map(function(msg) {
+      const batchWithPhone = batch;
+      const results = await Promise.allSettled(batchWithPhone.map(function(msg) {
         return sendTemplateMessage(config, msg.phone, campaign.template_name, campaign.template_language, campaign.template_components, msg.id);
       }));
-      results.forEach(function(r) { if (r.status === 'fulfilled' && r.value.success) sentCount++; else failedCount++; });
+      results.forEach(function(r, idx) {
+        if (r.status === 'fulfilled' && r.value.success) {
+          sentCount++;
+          // F8B: Registrar template enviado (fire and forget)
+          trackTemplateUsage(campaign.clinic_id, {
+            templateName:     campaign.template_name,
+            templateCategory: campaign.template_category || 'utility',
+            phone:            batchWithPhone[idx].phone,
+            messageSid:       r.value.wamid || null,
+            campaignId:       campaign.id
+          }).catch(function(err) { console.error('[tracking] template:', err.message); });
+        } else {
+          failedCount++;
+        }
+      });
       if (i + throttle.batchSize < messages.length) await sleep(throttle.batchDelayMs);
     }
 

@@ -22,6 +22,8 @@ import financialRoutes from './routes/financialRoutes.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
 import adminAuthRoutes from './routes/adminAuthRoutes.js';
 import adminClinicRoutes from './routes/adminClinicRoutes.js';
+import adminUsageRoutes from './routes/adminUsageRoutes.js';
+import { trackAiUsage } from './services/usageTracker.js';
 
 
 
@@ -384,10 +386,11 @@ app.use('/crm/api/financial', authMiddleware(supabase), financialRoutes);
 app.use('/crm/api', createCrmApiRouter(supabase));
 
 // ======================================================
-// BACKOFFICE GV AUTOMAÇÕES (F8A)
+// BACKOFFICE GV AUTOMAÇÕES (F8A + F8B)
 // ======================================================
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/clinics', adminClinicRoutes);
+app.use('/api/admin/usage', adminUsageRoutes);
 
 
 
@@ -1753,7 +1756,7 @@ async function buildConfirmationMessage(state, doctorName, clinicName, clinicId)
  * Gera resumo comprimido a cada SUMMARY_TRIGGER_MESSAGES mensagens.
  * Salva em state.running_summary para injeção no system prompt.
  */
-async function maybeGenerateSummary(conversationHistory, state, openaiClient) {
+async function maybeGenerateSummary(conversationHistory, state, openaiClient, clinicId) {
   const TRIGGER = Number(process.env.SUMMARY_TRIGGER_MESSAGES || 10);
   const COOLDOWN_MINUTES = 30;
 
@@ -1789,6 +1792,14 @@ async function maybeGenerateSummary(conversationHistory, state, openaiClient) {
     const summary = summaryResponse.choices[0].message.content;
     const updatedState = { ...state, running_summary: summary, last_summary_at: new Date().toISOString() };
     console.log(`[SUMMARY] Generated: ${summary.substring(0, 80)}...`);
+
+    // F8B: Registrar tokens do summary (fire and forget)
+    if (clinicId && summaryResponse.usage) {
+      trackAiUsage(clinicId, 'conversation', summaryResponse, {
+        model: summaryResponse.model || process.env.OPENAI_MODEL || 'gpt-4o-mini'
+      }).catch(function(err) { console.error('[tracking] summary:', err.message); });
+    }
+
     return updatedState;
   } catch (e) {
     console.warn('[SUMMARY] Failed to generate summary:', e.message);
@@ -2630,7 +2641,7 @@ console.log(`📜 Histórico: ${previousMessages.length} mensagens anteriores`);
 // Gerar summary comprimido se conversa está longa
 let activeConvState = conversationState;
 if (previousMessages.length > 0) {
-  activeConvState = await maybeGenerateSummary(previousMessages, conversationState, openai);
+  activeConvState = await maybeGenerateSummary(previousMessages, conversationState, openai, envelope.clinic_id);
   if (activeConvState.running_summary !== conversationState.running_summary) {
     await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
       running_summary: activeConvState.running_summary,
@@ -5289,6 +5300,16 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       });
     } catch (e) {
       log.warn({ err: String(e) }, 'agent_logs_insert_failed');
+    }
+
+    // F8B: Registrar uso acumulado da conversa (fire and forget)
+    if (totalTokensInput > 0 || totalTokensOutput > 0) {
+      trackAiUsage(envelope.clinic_id, 'conversation', null, {
+        tokensInput:  totalTokensInput,
+        tokensOutput: totalTokensOutput,
+        model:        process.env.OPENAI_MODEL || 'gpt-4.1',
+        correlation_id: envelope.correlation_id
+      }).catch(function(err) { console.error('[tracking] conversation:', err.message); });
     }
 
     // ======================================================

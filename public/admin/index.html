@@ -7,6 +7,7 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
@@ -314,6 +315,32 @@
 
     /* Empty */
     .empty { padding: 60px; text-align: center; color: var(--text-secondary); font-size: 14px; }
+
+    /* Period selector */
+    .period-bar { display: flex; align-items: center; gap: 10px; }
+    .period-select {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 12px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+    }
+
+    /* Usage table */
+    .cost-cell { font-family: 'SF Mono', 'Consolas', monospace; font-size: 13px; }
+    .cost-zero { color: var(--text-secondary); }
+
+    /* Chart canvas container */
+    .chart-wrap {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .chart-wrap canvas { max-height: 200px; }
 
     /* Coming soon */
     .coming-soon {
@@ -902,6 +929,233 @@ function ClinicsPage() {
   );
 }
 
+// ─── Clinic Usage Detail Modal ────────────────────────────────
+function ClinicUsageDetail(props) {
+  var detail = useState(null);
+  var setDetail = detail[1];
+  detail = detail[0];
+  var loading = useState(true);
+  var setLoading = loading[1];
+  loading = loading[0];
+  var chartRef = React.useRef(null);
+  var chartInst = React.useRef(null);
+
+  useEffect(function() {
+    setLoading(true);
+    q('/api/admin/usage/clinic/' + props.clinicId + '?year=' + props.year + '&month=' + props.month)
+      .then(function(data) { setDetail(data); setLoading(false); })
+      .catch(function() { setLoading(false); });
+  }, [props.clinicId, props.year, props.month]);
+
+  useEffect(function() {
+    if (!detail || !chartRef.current) return;
+    var days = detail.ai && detail.ai.by_day ? detail.ai.by_day : [];
+    if (chartInst.current) { chartInst.current.destroy(); chartInst.current = null; }
+    var ctx = chartRef.current.getContext('2d');
+    chartInst.current = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: days.map(function(d) { return d.date.substring(5); }),
+        datasets: [{
+          label: 'Tokens/dia',
+          data: days.map(function(d) { return d.tokens; }),
+          borderColor: '#6366F1',
+          backgroundColor: 'rgba(99,102,241,0.1)',
+          tension: 0.3,
+          fill: true,
+          pointRadius: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#9CA3AF', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: '#9CA3AF', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+    return function() { if (chartInst.current) { chartInst.current.destroy(); chartInst.current = null; } };
+  }, [detail]);
+
+  return h('div', { className: 'modal-overlay', onClick: function(e) { if (e.target === e.currentTarget) props.onClose(); } },
+    h('div', { className: 'modal' },
+      h('div', { className: 'modal-header' },
+        h('h2', null, props.clinicName + ' — Uso ' + props.month + '/' + props.year),
+        h('button', { className: 'modal-close', onClick: props.onClose }, 'x')
+      ),
+      h('div', { className: 'modal-body' },
+        loading ? h(Loading) :
+        !detail ? h('div', { className: 'empty' }, 'Erro ao carregar dados.') :
+        h('div', null,
+          // KPIs
+          h('div', { className: 'kpi-grid', style: { gridTemplateColumns: 'repeat(4,1fr)', marginBottom: '24px' } },
+            h(KpiCard, { label: 'Tokens IA', value: (detail.ai.totals.tokens_total || 0).toLocaleString('pt-BR') }),
+            h(KpiCard, { label: 'Custo IA (USD)', value: '$' + detail.ai.totals.cost_usd.toFixed(4), variant: 'accent' }),
+            h(KpiCard, { label: 'Templates Enviados', value: detail.templates.totals.count }),
+            h(KpiCard, { label: 'Custo Templates (USD)', value: '$' + detail.templates.totals.cost_usd.toFixed(4) })
+          ),
+
+          // Grafico
+          h('div', { className: 'modal-section' },
+            h('div', { className: 'modal-section-title' }, 'Tokens por dia'),
+            h('div', { className: 'chart-wrap' },
+              detail.ai.by_day.length === 0
+                ? h('div', { style: { textAlign: 'center', color: 'var(--text-secondary)', padding: '32px', fontSize: '13px' } }, 'Sem dados no periodo.')
+                : h('canvas', { ref: chartRef, height: 200 })
+            )
+          ),
+
+          // Templates recentes
+          h('div', { className: 'modal-section' },
+            h('div', { className: 'modal-section-title' }, 'Templates recentes (' + detail.templates.totals.count + ')'),
+            detail.templates.recent.length === 0
+              ? h('div', { style: { fontSize: '13px', color: 'var(--text-secondary)' } }, 'Nenhum template enviado.')
+              : h('div', { className: 'table-wrap' },
+                  h('table', null,
+                    h('thead', null,
+                      h('tr', null,
+                        h('th', null, 'Template'),
+                        h('th', null, 'Categoria'),
+                        h('th', null, 'Status'),
+                        h('th', null, 'Custo (USD)'),
+                        h('th', null, 'Data')
+                      )
+                    ),
+                    h('tbody', null,
+                      detail.templates.recent.slice(0, 20).map(function(t, i) {
+                        return h('tr', { key: i },
+                          h('td', { style: { fontFamily: 'monospace', fontSize: '12px' } }, t.template_name),
+                          h('td', null, h('span', { className: 'badge ' + (t.template_category === 'marketing' ? 'badge-pro' : 'badge-starter') }, t.template_category)),
+                          h('td', null, h('span', { className: 'badge ' + (t.status === 'sent' || t.status === 'delivered' ? 'badge-active' : (t.status === 'failed' ? 'badge-inactive' : 'badge-starter')) }, t.status)),
+                          h('td', { className: 'cost-cell' }, '$' + parseFloat(t.cost_usd).toFixed(4)),
+                          h('td', null, t.created_at ? t.created_at.substring(0, 10) : '-')
+                        );
+                      })
+                    )
+                  )
+                )
+          ),
+
+          // Grand total
+          h('div', { style: { padding: '16px 0', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' } },
+            h('span', { style: { fontSize: '14px', color: 'var(--text-secondary)' } }, 'Total no periodo'),
+            h('span', { style: { fontSize: '18px', fontWeight: 700, color: 'var(--accent)' } }, '$' + detail.grand_total_usd.toFixed(4) + ' USD')
+          )
+        )
+      )
+    )
+  );
+}
+
+// ─── Usage Page ───────────────────────────────────────────────
+function UsagePage() {
+  var now = new Date();
+  var yearState = useState(now.getFullYear());
+  var year = yearState[0]; var setYear = yearState[1];
+  var monthState = useState(now.getMonth() + 1);
+  var month = monthState[0]; var setMonth = monthState[1];
+  var summaryState = useState(null);
+  var summary = summaryState[0]; var setSummary = summaryState[1];
+  var loading = useState(true);
+  var setLoading = loading[1];
+  loading = loading[0];
+  var selected = useState(null);
+  var setSelected = selected[1];
+  selected = selected[0];
+
+  function load() {
+    setLoading(true);
+    q('/api/admin/usage/summary?year=' + year + '&month=' + month)
+      .then(function(data) { setSummary(data); setLoading(false); })
+      .catch(function() { setLoading(false); });
+  }
+
+  useEffect(function() { load(); }, [year, month]);
+
+  var rows = (summary && summary.summary) ? summary.summary : [];
+  var totalUsd = rows.reduce(function(acc, r) { return acc + (r.total_cost_usd || 0); }, 0);
+
+  var months = ['Janeiro','Fevereiro','Marco','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var years = [2025, 2026, 2027];
+
+  return h('div', null,
+    // Toolbar
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' } },
+      h('div', { className: 'period-bar' },
+        h('select', {
+          className: 'period-select',
+          value: month,
+          onChange: function(e) { setMonth(parseInt(e.target.value)); }
+        },
+          months.map(function(m, i) { return h('option', { key: i+1, value: i+1 }, m); })
+        ),
+        h('select', {
+          className: 'period-select',
+          value: year,
+          onChange: function(e) { setYear(parseInt(e.target.value)); }
+        },
+          years.map(function(y) { return h('option', { key: y, value: y }, y); })
+        )
+      ),
+      rows.length > 0 ? h('span', { style: { marginLeft: 'auto', fontSize: '13px', color: 'var(--text-secondary)' } },
+        'Total do periodo: ' + h('strong', { style: { color: 'var(--accent)' } }, '$' + totalUsd.toFixed(4) + ' USD')
+      ) : null
+    ),
+
+    loading ? h(Loading) :
+    h('div', { className: 'table-wrap' },
+      h('table', null,
+        h('thead', null,
+          h('tr', null,
+            h('th', null, 'Clinica'),
+            h('th', null, 'Tokens IA'),
+            h('th', null, 'Custo IA'),
+            h('th', null, 'Templates'),
+            h('th', null, 'Custo Templates'),
+            h('th', null, 'Total USD'),
+            h('th', null, '')
+          )
+        ),
+        h('tbody', null,
+          rows.length === 0
+            ? h('tr', null, h('td', { colSpan: 7, style: { textAlign: 'center', color: 'var(--text-secondary)', padding: '40px', fontSize: '13px' } }, 'Nenhum uso registrado no periodo. Apos o deploy, envie uma mensagem pelo WhatsApp para gerar dados.'))
+            : rows.map(function(r) {
+                var hasData = r.total_cost_usd > 0;
+                return h('tr', { key: r.clinic_id },
+                  h('td', null,
+                    h('div', { style: { fontWeight: 600, fontSize: '14px' } }, r.clinic_name),
+                    h('div', { style: { fontSize: '11px', color: 'var(--text-secondary)' } }, r.clinic_id.substring(0, 8) + '...')
+                  ),
+                  h('td', { className: 'cost-cell' + (!r.ai_tokens ? ' cost-zero' : '') }, (r.ai_tokens || 0).toLocaleString('pt-BR')),
+                  h('td', { className: 'cost-cell' + (!r.ai_cost_usd ? ' cost-zero' : '') }, '$' + (r.ai_cost_usd || 0).toFixed(4)),
+                  h('td', { className: 'cost-cell' + (!r.template_count ? ' cost-zero' : '') }, r.template_count || 0),
+                  h('td', { className: 'cost-cell' + (!r.template_cost_usd ? ' cost-zero' : '') }, '$' + (r.template_cost_usd || 0).toFixed(4)),
+                  h('td', null,
+                    h('strong', { style: { fontSize: '14px', color: hasData ? 'var(--accent)' : 'var(--text-secondary)' } },
+                      '$' + (r.total_cost_usd || 0).toFixed(4)
+                    )
+                  ),
+                  h('td', null,
+                    h('button', { className: 'btn-action', onClick: function() { setSelected(r); } }, 'Detalhe')
+                  )
+                );
+              })
+        )
+      )
+    ),
+
+    selected ? h(ClinicUsageDetail, {
+      clinicId:   selected.clinic_id,
+      clinicName: selected.clinic_name,
+      year:       year,
+      month:      month,
+      onClose:    function() { setSelected(null); }
+    }) : null
+  );
+}
+
 // ─── Coming Soon ──────────────────────────────────────────────
 function ComingSoonPage(props) {
   return h('div', { className: 'coming-soon' },
@@ -918,7 +1172,7 @@ function Sidebar(props) {
   var navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: 'o', section: 'PLATAFORMA' },
     { id: 'clinics', label: 'Clinicas', icon: '#', section: null },
-    { id: 'usage', label: 'Uso de Tokens', icon: '~', section: null, soon: 'F8B' },
+    { id: 'usage', label: 'Uso de Tokens', icon: '~', section: null },
     { id: 'billing', label: 'Billing', icon: '$', section: null, soon: 'F8C' },
     { id: 'alerts', label: 'Alertas', icon: '!', section: null, soon: 'F8D' }
   ];
@@ -992,11 +1246,7 @@ function App() {
   function renderPage() {
     if (page === 'dashboard') return h(DashboardPage);
     if (page === 'clinics') return h(ClinicsPage);
-    if (page === 'usage') return h(ComingSoonPage, {
-      icon: '~',
-      title: 'Uso de Tokens (F8B)',
-      description: 'Monitoramento de consumo de tokens OpenAI por clinica sera implementado no F8B.'
-    });
+    if (page === 'usage') return h(UsagePage);
     if (page === 'billing') return h(ComingSoonPage, {
       icon: '$',
       title: 'Billing (F8C)',

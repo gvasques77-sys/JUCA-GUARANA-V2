@@ -13,6 +13,7 @@
  */
 
 import OpenAI from 'openai';
+import { trackAiUsage } from './usageTracker.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'missing' });
 
@@ -36,7 +37,7 @@ export async function generateReport(supabase, clinicId) {
     const hasData = metrics.overview.total_patients_tracked > 0 || metrics.overview.total_events > 0;
 
     // 3. Gerar análise com OpenAI
-    const analysis = await generateAnalysis(metrics, hasData);
+    const analysis = await generateAnalysis(metrics, hasData, clinicId);
     if (!analysis.success) {
       return { success: false, error: analysis.error };
     }
@@ -334,6 +335,10 @@ Máximo 400 palavras.`;
     const outputCost = ((response.usage?.completion_tokens || 0) / 1_000_000) * 8.00;
     const costEstimated = parseFloat((inputCost + outputCost).toFixed(6));
 
+    // F8B: Registrar uso do relatório de paciente (fire and forget)
+    trackAiUsage(clinicId, 'report', response, { report_type: 'patient' })
+      .catch(err => console.error('[tracking] patient_report:', err.message));
+
     // 8. Salvar em crm_reports
     const now = new Date();
     const { data: report, error: insertErr } = await supabase
@@ -370,7 +375,7 @@ Máximo 400 palavras.`;
   }
 }
 
-async function generateAnalysis(metrics, hasData) {
+async function generateAnalysis(metrics, hasData, clinicId) {
   try {
     const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
@@ -441,6 +446,12 @@ Máximo 500 palavras. Seja direto e objetivo.`;
     const costEstimated = parseFloat((inputCost + outputCost).toFixed(6));
 
     console.log(`[REPORT] Análise gerada: ${text.length} chars, ${tokensUsed} tokens, $${costEstimated}`);
+
+    // F8B: Registrar uso do relatório CRM (fire and forget)
+    if (clinicId) {
+      trackAiUsage(clinicId, 'report', response, { report_type: 'crm_overview' })
+        .catch(err => console.error('[tracking] crm_report:', err.message));
+    }
 
     return {
       success: true,
