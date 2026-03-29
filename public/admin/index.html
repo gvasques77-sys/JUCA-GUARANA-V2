@@ -1,486 +1,1037 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel | Secretária Inteligente</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Inter', sans-serif; }
-        .fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GV AUTOMACOES - Backoffice</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --accent: #6366F1;
+      --accent-hover: #4F46E5;
+      --bg-base: #070A0F;
+      --bg-card: rgba(255,255,255,0.04);
+      --bg-card-hover: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.08);
+      --text-primary: #E8EAF0;
+      --text-secondary: #9CA3AF;
+      --success: #10B981;
+      --danger: #EF4444;
+      --warning: #F59E0B;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+    #root { display: flex; min-height: 100vh; }
+
+    /* Sidebar */
+    .sidebar {
+      width: 240px;
+      min-height: 100vh;
+      background: rgba(255,255,255,0.02);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 24px 0;
+      flex-shrink: 0;
+    }
+    .sidebar-logo {
+      padding: 0 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-logo .brand { font-size: 11px; color: #6B7280; letter-spacing: 2px; text-transform: uppercase; }
+    .sidebar-logo .title { font-size: 16px; font-weight: 700; margin-top: 4px; }
+    .sidebar-nav { flex: 1; padding: 16px 12px; }
+    .nav-section { font-size: 10px; color: #4B5563; text-transform: uppercase; letter-spacing: 1.5px; padding: 8px 8px 4px; }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      margin-bottom: 2px;
+      transition: background 0.15s;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+    .nav-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+    .nav-item.active { background: rgba(99,102,241,0.15); color: var(--accent); }
+    .nav-item .icon { font-size: 16px; width: 18px; text-align: center; }
+    .nav-item .badge {
+      margin-left: auto;
+      background: var(--danger);
+      color: white;
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 10px;
+    }
+    .nav-item .soon {
+      margin-left: auto;
+      font-size: 10px;
+      color: #4B5563;
+      background: rgba(255,255,255,0.04);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .sidebar-footer {
+      padding: 16px 12px;
+      border-top: 1px solid var(--border);
+    }
+    .admin-info {
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: var(--bg-card);
+      margin-bottom: 8px;
+    }
+    .admin-info .admin-name { font-size: 13px; font-weight: 600; }
+    .admin-info .admin-role { font-size: 11px; color: var(--text-secondary); text-transform: capitalize; }
+    .btn-logout {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .btn-logout:hover { background: rgba(239,68,68,0.08); color: var(--danger); border-color: rgba(239,68,68,0.3); }
+
+    /* Main */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: auto; }
+    .topbar {
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .topbar h1 { font-size: 20px; font-weight: 700; }
+    .topbar .sub { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+    .content { padding: 32px; }
+
+    /* KPI Cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .kpi-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .kpi-label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
+    .kpi-value { font-size: 32px; font-weight: 700; margin: 8px 0 4px; }
+    .kpi-sub { font-size: 12px; color: var(--text-secondary); }
+    .kpi-card.danger { border-color: rgba(239,68,68,0.3); }
+    .kpi-card.danger .kpi-value { color: var(--danger); }
+    .kpi-card.success .kpi-value { color: var(--success); }
+    .kpi-card.accent .kpi-value { color: var(--accent); }
+
+    /* Section */
+    .section-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+
+    /* Table */
+    .table-wrap {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .table-toolbar {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .search-input {
+      flex: 1;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      max-width: 320px;
+    }
+    .search-input:focus { border-color: rgba(99,102,241,0.5); }
+    .filter-btn {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .filter-btn.active { background: rgba(99,102,241,0.15); color: var(--accent); border-color: rgba(99,102,241,0.4); }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      padding: 12px 20px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-bottom: 1px solid var(--border);
+    }
+    td { padding: 14px 20px; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .clinic-name { font-weight: 600; }
+    .clinic-email { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .badge-active { background: rgba(16,185,129,0.15); color: var(--success); }
+    .badge-inactive { background: rgba(239,68,68,0.12); color: var(--danger); }
+    .badge-starter { background: rgba(156,163,175,0.15); color: #9CA3AF; }
+    .badge-pro { background: rgba(99,102,241,0.15); color: var(--accent); }
+    .badge-enterprise { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .btn-action {
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--text-secondary);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-action:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+    .btn-primary {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 24px;
+    }
+    .modal {
+      background: #0D1117;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 680px;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-header h2 { font-size: 18px; font-weight: 700; }
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .modal-close:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+    .modal-body { padding: 24px; }
+    .modal-section { margin-bottom: 24px; }
+    .modal-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .detail-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { font-size: 13px; color: var(--text-secondary); }
+    .detail-value { font-size: 13px; font-weight: 500; }
+
+    /* Form */
+    .form-group { margin-bottom: 16px; }
+    .form-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: block; }
+    .form-input {
+      width: 100%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 14px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+    }
+    .form-input:focus { border-color: rgba(99,102,241,0.5); }
+    .form-select {
+      width: 100%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 14px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+    }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .modal-footer { padding: 20px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+
+    /* Loading */
+    .loading { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(--text-secondary); font-size: 14px; }
+    .spinner { width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Empty */
+    .empty { padding: 60px; text-align: center; color: var(--text-secondary); font-size: 14px; }
+
+    /* Coming soon */
+    .coming-soon {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px;
+      text-align: center;
+    }
+    .coming-soon .icon { font-size: 48px; margin-bottom: 16px; }
+    .coming-soon h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    .coming-soon p { color: var(--text-secondary); font-size: 14px; }
+
+    /* Alert row */
+    .alert-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .alert-row:last-child { border-bottom: none; }
+    .alert-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+    .alert-dot-error { background: var(--danger); }
+    .alert-dot-warning { background: var(--warning); }
+    .alert-dot-info { background: var(--accent); }
+    .alert-title { font-size: 13px; font-weight: 500; }
+    .alert-time { font-size: 11px; color: var(--text-secondary); }
+
+    /* User row */
+    .user-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 12px;
+      margin: 3px;
+    }
+    .user-role { color: var(--text-secondary); }
+  </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body>
+<div id="root"></div>
 
-    <!-- LOGIN -->
-    <div id="loginModal" class="fixed inset-0 bg-gradient-to-br from-indigo-600 to-purple-700 flex items-center justify-center z-50">
-        <div class="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl fade-in">
-            <div class="text-center mb-8">
-                <div class="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                    <i data-lucide="calendar-heart" class="w-8 h-8 text-indigo-600"></i>
-                </div>
-                <h1 class="text-2xl font-bold text-gray-900">Secretária Inteligente</h1>
-                <p class="text-gray-500 mt-1">Painel da Recepção</p>
-            </div>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Senha</label>
-                    <input type="password" id="loginPassword"
-                           class="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-indigo-500"
-                           placeholder="••••••••"
-                           onkeypress="if(event.key==='Enter') doLogin()">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Clinic ID <span class="text-gray-400 text-xs font-normal">(preenchido automaticamente)</span></label>
-                    <input type="text" id="loginClinicId"
-                           class="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-sm"
-                           placeholder="UUID da clínica"
-                           onkeypress="if(event.key==='Enter') doLogin()">
-                </div>
-                <button onclick="doLogin()" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700">
-                    Entrar
-                </button>
-                <p id="loginError" class="text-red-500 text-sm text-center hidden">Senha ou Clinic ID incorretos</p>
-            </div>
-        </div>
-    </div>
+<script type="text/babel" data-presets="react">
+var h = React.createElement;
+var useState = React.useState;
+var useEffect = React.useEffect;
+var useCallback = React.useCallback;
 
-    <!-- MAIN -->
-    <div id="mainContent" class="hidden">
-        <!-- Header -->
-        <header class="bg-white border-b sticky top-0 z-20">
-            <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
-                        <i data-lucide="calendar-heart" class="w-6 h-6 text-indigo-600"></i>
-                    </div>
-                    <span class="text-xl font-bold text-gray-900">Secretária Inteligente</span>
-                </div>
-                <div class="flex items-center gap-4">
-                    <span class="text-sm text-gray-500" id="currentDate"></span>
-                    <button onclick="loadAllData()" class="p-2 hover:bg-gray-100 rounded-lg" title="Atualizar">
-                        <i data-lucide="refresh-cw" class="w-5 h-5 text-gray-500"></i>
-                    </button>
-                    <button onclick="openModal('newAppointmentModal')" class="px-4 py-2 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 flex items-center gap-2">
-                        <i data-lucide="plus" class="w-5 h-5"></i>
-                        <span class="hidden sm:inline">Novo</span>
-                    </button>
-                    <button onclick="logout()" class="p-2 hover:bg-gray-100 rounded-lg" title="Sair">
-                        <i data-lucide="log-out" class="w-5 h-5 text-gray-500"></i>
-                    </button>
-                </div>
-            </div>
-        </header>
+// ─── Auth helpers ──────────────────────────────────────────────
+function getToken() { return localStorage.getItem('gv_admin_token'); }
+function getUser() {
+  var raw = localStorage.getItem('gv_admin_user');
+  try { return raw ? JSON.parse(raw) : null; } catch(e) { return null; }
+}
+function clearAuth() {
+  localStorage.removeItem('gv_admin_token');
+  localStorage.removeItem('gv_admin_user');
+}
 
-        <main class="max-w-7xl mx-auto px-4 py-8">
-            <!-- Stats -->
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                <div class="bg-white rounded-2xl p-6 border">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                            <i data-lucide="calendar-check" class="w-6 h-6 text-blue-600"></i>
-                        </div>
-                        <div>
-                            <p class="text-3xl font-bold" id="statToday">-</p>
-                            <p class="text-sm text-gray-500">Hoje</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-2xl p-6 border">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
-                            <i data-lucide="clock" class="w-6 h-6 text-yellow-600"></i>
-                        </div>
-                        <div>
-                            <p class="text-3xl font-bold" id="statPending">-</p>
-                            <p class="text-sm text-gray-500">Pendentes</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-2xl p-6 border">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                            <i data-lucide="calendar-days" class="w-6 h-6 text-green-600"></i>
-                        </div>
-                        <div>
-                            <p class="text-3xl font-bold" id="statWeek">-</p>
-                            <p class="text-sm text-gray-500">Semana</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-2xl p-6 border">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
-                            <i data-lucide="users" class="w-6 h-6 text-purple-600"></i>
-                        </div>
-                        <div>
-                            <p class="text-3xl font-bold" id="statPatients">-</p>
-                            <p class="text-sm text-gray-500">Pacientes</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
+function q(path, opts) {
+  var token = getToken();
+  var headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return fetch(path, Object.assign({}, opts || {}, { headers: headers }))
+    .then(function(res) {
+      if (res.status === 401) {
+        clearAuth();
+        window.location.href = '/admin/login.html';
+        return Promise.reject(new Error('Unauthorized'));
+      }
+      return res.json();
+    });
+}
 
-            <!-- Filters -->
-            <div class="bg-white rounded-2xl p-4 border mb-6">
-                <div class="flex flex-wrap items-end gap-4">
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Data</label>
-                        <input type="date" id="filterDate" onchange="loadAppointments()"
-                               class="px-4 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Médico</label>
-                        <select id="filterDoctor" onchange="loadAppointments()"
-                                class="px-4 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 min-w-[180px]">
-                            <option value="">Todos</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Status</label>
-                        <select id="filterStatus" onchange="loadAppointments()"
-                                class="px-4 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500">
-                            <option value="">Todos</option>
-                            <option value="scheduled">Agendado</option>
-                            <option value="confirmed">Confirmado</option>
-                            <option value="waiting">Aguardando</option>
-                            <option value="in_progress">Em Atendimento</option>
-                            <option value="completed">Finalizado</option>
-                            <option value="cancelled">Cancelado</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
+function formatDate(iso) {
+  if (!iso) return '-';
+  return new Date(iso).toLocaleDateString('pt-BR');
+}
 
-            <!-- Table -->
-            <div class="bg-white rounded-2xl border overflow-hidden">
-                <table class="w-full">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Horário</th>
-                            <th class="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Paciente</th>
-                            <th class="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Médico</th>
-                            <th class="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Serviço</th>
-                            <th class="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
-                            <th class="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="appointmentsTable" class="divide-y"></tbody>
-                </table>
-                <div id="emptyState" class="hidden py-12 text-center">
-                    <i data-lucide="inbox" class="w-12 h-12 text-gray-300 mx-auto mb-4"></i>
-                    <p class="text-gray-500">Nenhum agendamento</p>
-                </div>
-                <div id="loadingState" class="hidden py-12 text-center">
-                    <div class="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                </div>
-            </div>
-        </main>
-    </div>
+// ─── KPI Card ─────────────────────────────────────────────────
+function KpiCard(props) {
+  return h('div', { className: 'kpi-card' + (props.variant ? ' ' + props.variant : '') },
+    h('div', { className: 'kpi-label' }, props.label),
+    h('div', { className: 'kpi-value' }, props.value),
+    props.sub ? h('div', { className: 'kpi-sub' }, props.sub) : null
+  );
+}
 
-    <!-- MODAL: Novo Agendamento -->
-    <div id="newAppointmentModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-2xl w-full max-w-lg mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div class="sticky top-0 bg-white px-6 py-4 border-b flex items-center justify-between">
-                <h2 class="text-xl font-bold">Novo Agendamento</h2>
-                <button onclick="closeModal('newAppointmentModal')" class="p-2 hover:bg-gray-100 rounded-lg">
-                    <i data-lucide="x" class="w-5 h-5"></i>
-                </button>
-            </div>
-            <form id="newAppointmentForm" class="p-6 space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Telefone *</label>
-                    <input type="tel" name="patient_phone" required
-                           class="w-full px-4 py-3 border rounded-xl" placeholder="11999999999">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
-                    <input type="text" name="patient_name" required
-                           class="w-full px-4 py-3 border rounded-xl" placeholder="Nome completo">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Médico *</label>
-                    <select name="doctor_id" required id="modalDoctorSelect" class="w-full px-4 py-3 border rounded-xl">
-                        <option value="">Selecione...</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Serviço *</label>
-                    <select name="service_id" required id="modalServiceSelect" class="w-full px-4 py-3 border rounded-xl">
-                        <option value="">Selecione...</option>
-                    </select>
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Data *</label>
-                        <input type="date" name="appointment_date" required class="w-full px-4 py-3 border rounded-xl">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Horário *</label>
-                        <input type="time" name="start_time" required class="w-full px-4 py-3 border rounded-xl">
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Observações</label>
-                    <textarea name="notes" rows="2" class="w-full px-4 py-3 border rounded-xl resize-none"></textarea>
-                </div>
-                <div class="flex gap-3 pt-4">
-                    <button type="button" onclick="closeModal('newAppointmentModal')"
-                            class="flex-1 py-3 border rounded-xl font-medium hover:bg-gray-50">Cancelar</button>
-                    <button type="submit" class="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700">Agendar</button>
-                </div>
-            </form>
-        </div>
-    </div>
+// ─── Loading ──────────────────────────────────────────────────
+function Loading() {
+  return h('div', { className: 'loading' },
+    h('div', { className: 'spinner' }),
+    'Carregando...'
+  );
+}
 
-    <!-- Toast -->
-    <div id="toast" class="fixed bottom-4 right-4 bg-gray-900 text-white px-6 py-4 rounded-xl shadow-lg hidden z-50">
-        <span id="toastMessage"></span>
-    </div>
+// ─── Billing Form ─────────────────────────────────────────────
+function BillingForm(props) {
+  var billing = props.billing || {};
+  var state = useState({
+    plan: billing.plan || 'starter',
+    monthly_fee: billing.monthly_fee || 0,
+    billing_day: billing.billing_day || 1,
+    price_per_1k_tokens_input: billing.price_per_1k_tokens_input || 0,
+    price_per_1k_tokens_output: billing.price_per_1k_tokens_output || 0,
+    price_per_template: billing.price_per_template || 0,
+    asaas_customer_id: billing.asaas_customer_id || '',
+    notes: billing.notes || ''
+  });
+  var form = state[0];
+  var setForm = state[1];
+  var saving = useState(false);
+  var setSaving = saving[1];
+  saving = saving[0];
 
-    <script>
-        const API_BASE = window.location.origin + '/admin';
-        let AUTH_TOKEN = '';
-        let CLINIC_ID = '';
-        let doctors = [];
-        let services = [];
+  function set(field, val) {
+    setForm(function(prev) {
+      var next = {};
+      Object.keys(prev).forEach(function(k) { next[k] = prev[k]; });
+      next[field] = val;
+      return next;
+    });
+  }
 
-        const STATUS = {
-            'scheduled': { label: 'Agendado', bg: 'bg-blue-100', text: 'text-blue-700' },
-            'confirmed': { label: 'Confirmado', bg: 'bg-green-100', text: 'text-green-700' },
-            'waiting': { label: 'Aguardando', bg: 'bg-yellow-100', text: 'text-yellow-700' },
-            'in_progress': { label: 'Em Atendimento', bg: 'bg-purple-100', text: 'text-purple-700' },
-            'completed': { label: 'Finalizado', bg: 'bg-gray-100', text: 'text-gray-600' },
-            'cancelled': { label: 'Cancelado', bg: 'bg-red-100', text: 'text-red-700' },
-            'no_show': { label: 'Faltou', bg: 'bg-orange-100', text: 'text-orange-700' }
-        };
+  function save() {
+    setSaving(true);
+    q('/api/admin/clinics/' + props.clinicId + '/billing', {
+      method: 'PUT',
+      body: JSON.stringify(form)
+    })
+    .then(function(data) {
+      setSaving(false);
+      if (data.id) { props.onSaved(data); }
+    })
+    .catch(function() { setSaving(false); });
+  }
 
-        // Busca o clinic_id padrão configurado no servidor
-        async function fetchClinicInfo() {
-            try {
-                const res = await fetch(`${API_BASE}/api/clinic-info`);
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.clinic_id) {
-                        CLINIC_ID = data.clinic_id;
-                        const el = document.getElementById('loginClinicId');
-                        if (el && !el.value) el.value = CLINIC_ID;
-                    }
-                }
-            } catch (e) { /* silencioso */ }
+  return h('div', null,
+    h('div', { className: 'form-row' },
+      h('div', { className: 'form-group' },
+        h('label', { className: 'form-label' }, 'Plano'),
+        h('select', {
+          className: 'form-select',
+          value: form.plan,
+          onChange: function(e) { set('plan', e.target.value); }
+        },
+          h('option', { value: 'starter' }, 'Starter'),
+          h('option', { value: 'pro' }, 'Pro'),
+          h('option', { value: 'enterprise' }, 'Enterprise')
+        )
+      ),
+      h('div', { className: 'form-group' },
+        h('label', { className: 'form-label' }, 'Mensalidade (R$)'),
+        h('input', {
+          className: 'form-input',
+          type: 'number',
+          step: '0.01',
+          value: form.monthly_fee,
+          onChange: function(e) { set('monthly_fee', parseFloat(e.target.value) || 0); }
+        })
+      )
+    ),
+    h('div', { className: 'form-row' },
+      h('div', { className: 'form-group' },
+        h('label', { className: 'form-label' }, 'Preco por 1k tokens entrada'),
+        h('input', {
+          className: 'form-input',
+          type: 'number',
+          step: '0.000001',
+          value: form.price_per_1k_tokens_input,
+          onChange: function(e) { set('price_per_1k_tokens_input', parseFloat(e.target.value) || 0); }
+        })
+      ),
+      h('div', { className: 'form-group' },
+        h('label', { className: 'form-label' }, 'Preco por 1k tokens saida'),
+        h('input', {
+          className: 'form-input',
+          type: 'number',
+          step: '0.000001',
+          value: form.price_per_1k_tokens_output,
+          onChange: function(e) { set('price_per_1k_tokens_output', parseFloat(e.target.value) || 0); }
+        })
+      )
+    ),
+    h('div', { className: 'form-row' },
+      h('div', { className: 'form-group' },
+        h('label', { className: 'form-label' }, 'Preco por template'),
+        h('input', {
+          className: 'form-input',
+          type: 'number',
+          step: '0.0001',
+          value: form.price_per_template,
+          onChange: function(e) { set('price_per_template', parseFloat(e.target.value) || 0); }
+        })
+      ),
+      h('div', { className: 'form-group' },
+        h('label', { className: 'form-label' }, 'Dia de cobranca (1-28)'),
+        h('input', {
+          className: 'form-input',
+          type: 'number',
+          min: '1',
+          max: '28',
+          value: form.billing_day,
+          onChange: function(e) { set('billing_day', parseInt(e.target.value) || 1); }
+        })
+      )
+    ),
+    h('div', { className: 'form-group' },
+      h('label', { className: 'form-label' }, 'ID Cliente Asaas'),
+      h('input', {
+        className: 'form-input',
+        type: 'text',
+        placeholder: 'cus_...',
+        value: form.asaas_customer_id,
+        onChange: function(e) { set('asaas_customer_id', e.target.value); }
+      })
+    ),
+    h('div', { className: 'form-group' },
+      h('label', { className: 'form-label' }, 'Notas internas'),
+      h('input', {
+        className: 'form-input',
+        type: 'text',
+        value: form.notes,
+        onChange: function(e) { set('notes', e.target.value); }
+      })
+    ),
+    h('div', { style: { textAlign: 'right', marginTop: '8px' } },
+      h('button', {
+        className: 'btn-primary',
+        disabled: saving,
+        onClick: save
+      }, saving ? 'Salvando...' : 'Salvar Billing')
+    )
+  );
+}
+
+// ─── Clinic Detail Modal ───────────────────────────────────────
+function ClinicDetailModal(props) {
+  var detail = useState(null);
+  var setDetail = detail[1];
+  detail = detail[0];
+  var loading = useState(true);
+  var setLoading = loading[1];
+  loading = loading[0];
+  var toggling = useState(false);
+  var setToggling = toggling[1];
+  toggling = toggling[0];
+
+  useEffect(function() {
+    setLoading(true);
+    q('/api/admin/clinics/' + props.clinic.id)
+      .then(function(data) { setDetail(data); setLoading(false); })
+      .catch(function() { setLoading(false); });
+  }, [props.clinic.id]);
+
+  function toggleStatus() {
+    if (!detail) return;
+    setToggling(true);
+    q('/api/admin/clinics/' + detail.id + '/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: !detail.is_active })
+    })
+    .then(function(data) {
+      setDetail(function(prev) {
+        var next = {};
+        Object.keys(prev).forEach(function(k) { next[k] = prev[k]; });
+        next.is_active = data.is_active;
+        return next;
+      });
+      setToggling(false);
+      props.onStatusChanged(data);
+    })
+    .catch(function() { setToggling(false); });
+  }
+
+  function onBillingSaved(billing) {
+    setDetail(function(prev) {
+      var next = {};
+      Object.keys(prev).forEach(function(k) { next[k] = prev[k]; });
+      next.billing = billing;
+      return next;
+    });
+  }
+
+  return h('div', { className: 'modal-overlay', onClick: function(e) { if (e.target === e.currentTarget) props.onClose(); } },
+    h('div', { className: 'modal' },
+      h('div', { className: 'modal-header' },
+        h('div', null,
+          h('h2', null, props.clinic.name),
+          h('div', { style: { fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' } }, props.clinic.email)
+        ),
+        h('button', { className: 'modal-close', onClick: props.onClose }, 'x')
+      ),
+      h('div', { className: 'modal-body' },
+        loading ? h(Loading) : !detail ? h('div', { className: 'empty' }, 'Erro ao carregar detalhes.') :
+        h('div', null,
+
+          // Status + acao
+          h('div', { className: 'modal-section' },
+            h('div', { className: 'detail-row' },
+              h('span', { className: 'detail-label' }, 'Status'),
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+                h('span', { className: 'badge ' + (detail.is_active ? 'badge-active' : 'badge-inactive') },
+                  detail.is_active ? 'Ativa' : 'Inativa'
+                ),
+                h('button', {
+                  className: 'btn-action',
+                  disabled: toggling,
+                  onClick: toggleStatus,
+                  style: { borderColor: detail.is_active ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)', color: detail.is_active ? 'var(--danger)' : 'var(--success)' }
+                }, toggling ? '...' : (detail.is_active ? 'Desativar' : 'Ativar'))
+              )
+            ),
+            h('div', { className: 'detail-row' },
+              h('span', { className: 'detail-label' }, 'Telefone'),
+              h('span', { className: 'detail-value' }, detail.phone || '-')
+            ),
+            h('div', { className: 'detail-row' },
+              h('span', { className: 'detail-label' }, 'Criada em'),
+              h('span', { className: 'detail-value' }, formatDate(detail.created_at))
+            ),
+            h('div', { className: 'detail-row' },
+              h('span', { className: 'detail-label' }, 'Total de pacientes'),
+              h('span', { className: 'detail-value' }, detail.metrics ? detail.metrics.total_patients : '-')
+            )
+          ),
+
+          // Usuarios
+          h('div', { className: 'modal-section' },
+            h('div', { className: 'modal-section-title' }, 'Usuarios (' + ((detail.users && detail.users.length) || 0) + ')'),
+            !detail.users || detail.users.length === 0
+              ? h('div', { style: { fontSize: '13px', color: 'var(--text-secondary)' } }, 'Nenhum usuario cadastrado.')
+              : h('div', null,
+                  detail.users.map(function(u, i) {
+                    return h('span', { key: i, className: 'user-chip' },
+                      h('span', { className: 'user-role' }, u.role)
+                    );
+                  })
+                )
+          ),
+
+          // WhatsApp
+          h('div', { className: 'modal-section' },
+            h('div', { className: 'modal-section-title' }, 'WhatsApp'),
+            detail.whatsapp_config
+              ? h('div', null,
+                  h('div', { className: 'detail-row' },
+                    h('span', { className: 'detail-label' }, 'Display Name'),
+                    h('span', { className: 'detail-value' }, detail.whatsapp_config.display_name || '-')
+                  ),
+                  h('div', { className: 'detail-row' },
+                    h('span', { className: 'detail-label' }, 'Phone Number ID'),
+                    h('span', { className: 'detail-value', style: { fontFamily: 'monospace', fontSize: '12px' } }, detail.whatsapp_config.phone_number_id || '-')
+                  )
+                )
+              : h('div', { style: { fontSize: '13px', color: 'var(--text-secondary)' } }, 'Nao configurado.')
+          ),
+
+          // Alertas ativos
+          detail.active_alerts && detail.active_alerts.length > 0
+            ? h('div', { className: 'modal-section' },
+                h('div', { className: 'modal-section-title' }, 'Alertas ativos (' + detail.active_alerts.length + ')'),
+                h('div', null,
+                  detail.active_alerts.map(function(a, i) {
+                    return h('div', { key: i, className: 'alert-row' },
+                      h('div', { className: 'alert-dot alert-dot-' + a.alert_type }),
+                      h('div', null,
+                        h('div', { className: 'alert-title' }, a.title),
+                        h('div', { className: 'alert-time' }, formatDate(a.created_at))
+                      )
+                    );
+                  })
+                )
+              )
+            : null,
+
+          // Billing config
+          h('div', { className: 'modal-section' },
+            h('div', { className: 'modal-section-title' }, 'Configuracao de Billing'),
+            h(BillingForm, { clinicId: detail.id, billing: detail.billing, onSaved: onBillingSaved })
+          )
+        )
+      )
+    )
+  );
+}
+
+// ─── Dashboard Page ────────────────────────────────────────────
+function DashboardPage() {
+  var overview = useState(null);
+  var setOverview = overview[1];
+  overview = overview[0];
+  var clinics = useState([]);
+  var setClinics = clinics[1];
+  clinics = clinics[0];
+  var loading = useState(true);
+  var setLoading = loading[1];
+  loading = loading[0];
+
+  useEffect(function() {
+    setLoading(true);
+    Promise.all([
+      q('/api/admin/clinics/overview'),
+      q('/api/admin/clinics')
+    ])
+    .then(function(results) {
+      setOverview(results[0]);
+      setClinics((results[1].clinics || []).slice(0, 5));
+      setLoading(false);
+    })
+    .catch(function() { setLoading(false); });
+  }, []);
+
+  if (loading) return h(Loading);
+
+  return h('div', null,
+    h('div', { className: 'kpi-grid' },
+      h(KpiCard, { label: 'Total de Clinicas', value: overview ? overview.total_clinics : '-', variant: 'accent' }),
+      h(KpiCard, { label: 'Clinicas Ativas', value: overview ? overview.active_clinics : '-', variant: 'success' }),
+      h(KpiCard, { label: 'Total de Pacientes', value: overview ? overview.total_patients : '-' }),
+      h(KpiCard, {
+        label: 'Alertas Nao Resolvidos',
+        value: overview ? overview.unresolved_alerts : '-',
+        variant: overview && overview.unresolved_alerts > 0 ? 'danger' : ''
+      })
+    ),
+    h('div', { className: 'section-title' }, 'Clinicas Recentes'),
+    h('div', { className: 'table-wrap' },
+      h('table', null,
+        h('thead', null,
+          h('tr', null,
+            h('th', null, 'Clinica'),
+            h('th', null, 'Pacientes'),
+            h('th', null, 'Status'),
+            h('th', null, 'Plano')
+          )
+        ),
+        h('tbody', null,
+          clinics.length === 0
+            ? h('tr', null, h('td', { colSpan: 4, style: { textAlign: 'center', color: 'var(--text-secondary)', padding: '32px' } }, 'Nenhuma clinica cadastrada.'))
+            : clinics.map(function(c) {
+                var plan = c.billing ? c.billing.plan : null;
+                return h('tr', { key: c.id },
+                  h('td', null,
+                    h('div', { className: 'clinic-name' }, c.name),
+                    h('div', { className: 'clinic-email' }, c.email)
+                  ),
+                  h('td', null, c.metrics ? c.metrics.total_patients : '-'),
+                  h('td', null,
+                    h('span', { className: 'badge ' + (c.is_active ? 'badge-active' : 'badge-inactive') },
+                      c.is_active ? 'Ativa' : 'Inativa'
+                    )
+                  ),
+                  h('td', null,
+                    plan ? h('span', { className: 'badge badge-' + plan }, plan) : h('span', { style: { color: 'var(--text-secondary)', fontSize: '12px' } }, '-')
+                  )
+                );
+              })
+        )
+      )
+    )
+  );
+}
+
+// ─── Clinics Page ─────────────────────────────────────────────
+function ClinicsPage() {
+  var clinics = useState([]);
+  var setClinics = clinics[1];
+  clinics = clinics[0];
+  var loading = useState(true);
+  var setLoading = loading[1];
+  loading = loading[0];
+  var search = useState('');
+  var setSearch = search[1];
+  search = search[0];
+  var filter = useState('all');
+  var setFilter = filter[1];
+  filter = filter[0];
+  var selected = useState(null);
+  var setSelected = selected[1];
+  selected = selected[0];
+
+  function loadClinics() {
+    setLoading(true);
+    q('/api/admin/clinics')
+      .then(function(data) { setClinics(data.clinics || []); setLoading(false); })
+      .catch(function() { setLoading(false); });
+  }
+
+  useEffect(function() { loadClinics(); }, []);
+
+  function onStatusChanged(updated) {
+    setClinics(function(prev) {
+      return prev.map(function(c) {
+        if (c.id === updated.id) {
+          var next = {};
+          Object.keys(c).forEach(function(k) { next[k] = c[k]; });
+          next.is_active = updated.is_active;
+          return next;
         }
+        return c;
+      });
+    });
+  }
 
-        // Auth
-        function doLogin() {
-            AUTH_TOKEN = document.getElementById('loginPassword').value;
-            CLINIC_ID = document.getElementById('loginClinicId').value.trim() || CLINIC_ID;
-            fetch(`${API_BASE}/api/dashboard`, {
-                headers: {
-                    'Authorization': `Bearer ${AUTH_TOKEN}`,
-                    'x-clinic-id': CLINIC_ID
-                }
-            })
-            .then(res => {
-                if (res.ok) {
-                    localStorage.setItem('token', AUTH_TOKEN);
-                    localStorage.setItem('clinic_id', CLINIC_ID);
-                    document.getElementById('loginModal').classList.add('hidden');
-                    document.getElementById('mainContent').classList.remove('hidden');
-                    init();
-                } else {
-                    document.getElementById('loginError').classList.remove('hidden');
-                }
-            });
-        }
+  var filtered = clinics.filter(function(c) {
+    var matchSearch = !search || c.name.toLowerCase().indexOf(search.toLowerCase()) !== -1 || (c.email && c.email.toLowerCase().indexOf(search.toLowerCase()) !== -1);
+    var matchFilter = filter === 'all' || (filter === 'active' && c.is_active) || (filter === 'inactive' && !c.is_active);
+    return matchSearch && matchFilter;
+  });
 
-        function logout() {
-            localStorage.removeItem('token');
-            localStorage.removeItem('clinic_id');
-            location.reload();
-        }
+  if (loading) return h(Loading);
 
-        function checkAuth() {
-            const t = localStorage.getItem('token');
-            const c = localStorage.getItem('clinic_id');
-            if (t && c) {
-                AUTH_TOKEN = t;
-                CLINIC_ID = c;
-                document.getElementById('loginModal').classList.add('hidden');
-                document.getElementById('mainContent').classList.remove('hidden');
-                init();
-            }
-        }
+  return h('div', null,
+    h('div', { className: 'table-wrap' },
+      h('div', { className: 'table-toolbar' },
+        h('input', {
+          className: 'search-input',
+          type: 'text',
+          placeholder: 'Buscar por nome ou email...',
+          value: search,
+          onChange: function(e) { setSearch(e.target.value); }
+        }),
+        h('button', {
+          className: 'filter-btn' + (filter === 'all' ? ' active' : ''),
+          onClick: function() { setFilter('all'); }
+        }, 'Todas'),
+        h('button', {
+          className: 'filter-btn' + (filter === 'active' ? ' active' : ''),
+          onClick: function() { setFilter('active'); }
+        }, 'Ativas'),
+        h('button', {
+          className: 'filter-btn' + (filter === 'inactive' ? ' active' : ''),
+          onClick: function() { setFilter('inactive'); }
+        }, 'Inativas')
+      ),
+      h('table', null,
+        h('thead', null,
+          h('tr', null,
+            h('th', null, 'Clinica'),
+            h('th', null, 'Pacientes'),
+            h('th', null, 'Usuarios'),
+            h('th', null, 'Status'),
+            h('th', null, 'Plano'),
+            h('th', null, 'Desde'),
+            h('th', null, 'Acoes')
+          )
+        ),
+        h('tbody', null,
+          filtered.length === 0
+            ? h('tr', null, h('td', { colSpan: 7, style: { textAlign: 'center', color: 'var(--text-secondary)', padding: '32px' } }, 'Nenhuma clinica encontrada.'))
+            : filtered.map(function(c) {
+                var plan = c.billing ? c.billing.plan : null;
+                return h('tr', { key: c.id },
+                  h('td', null,
+                    h('div', { className: 'clinic-name' }, c.name),
+                    h('div', { className: 'clinic-email' }, c.email)
+                  ),
+                  h('td', null, c.metrics ? c.metrics.total_patients : '-'),
+                  h('td', null, c.metrics ? c.metrics.total_users : '-'),
+                  h('td', null,
+                    h('span', { className: 'badge ' + (c.is_active ? 'badge-active' : 'badge-inactive') },
+                      c.is_active ? 'Ativa' : 'Inativa'
+                    )
+                  ),
+                  h('td', null,
+                    plan ? h('span', { className: 'badge badge-' + plan }, plan) : h('span', { style: { color: 'var(--text-secondary)', fontSize: '12px' } }, '-')
+                  ),
+                  h('td', null, formatDate(c.created_at)),
+                  h('td', null,
+                    h('button', {
+                      className: 'btn-action',
+                      onClick: function() { setSelected(c); }
+                    }, 'Detalhes')
+                  )
+                );
+              })
+        )
+      )
+    ),
+    selected ? h(ClinicDetailModal, {
+      clinic: selected,
+      onClose: function() { setSelected(null); },
+      onStatusChanged: onStatusChanged
+    }) : null
+  );
+}
 
-        // Init
-        function init() {
-            lucide.createIcons();
-            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-            document.getElementById('filterDate').value = new Date().toISOString().split('T')[0];
-            document.getElementById('newAppointmentForm').addEventListener('submit', handleNewAppointment);
-            loadAllData();
-        }
+// ─── Coming Soon ──────────────────────────────────────────────
+function ComingSoonPage(props) {
+  return h('div', { className: 'coming-soon' },
+    h('div', { className: 'icon' }, props.icon || '...'),
+    h('h2', null, props.title),
+    h('p', null, props.description || 'Esta funcionalidade sera implementada em breve.')
+  );
+}
 
-        async function loadAllData() {
-            await Promise.all([loadDashboard(), loadDoctors(), loadServices(), loadAppointments()]);
-        }
+// ─── Sidebar ──────────────────────────────────────────────────
+function Sidebar(props) {
+  var user = props.user;
 
-        async function api(endpoint, options = {}) {
-            const res = await fetch(`${API_BASE}${endpoint}`, {
-                ...options,
-                headers: {
-                    'Authorization': `Bearer ${AUTH_TOKEN}`,
-                    'x-clinic-id': CLINIC_ID,
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                }
-            });
-            if (res.status === 401) { logout(); return null; }
-            return res.json();
-        }
+  var navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: 'o', section: 'PLATAFORMA' },
+    { id: 'clinics', label: 'Clinicas', icon: '#', section: null },
+    { id: 'usage', label: 'Uso de Tokens', icon: '~', section: null, soon: 'F8B' },
+    { id: 'billing', label: 'Billing', icon: '$', section: null, soon: 'F8C' },
+    { id: 'alerts', label: 'Alertas', icon: '!', section: null, soon: 'F8D' }
+  ];
 
-        async function loadDashboard() {
-            const data = await api('/api/dashboard');
-            if (data?.success) {
-                document.getElementById('statToday').textContent = data.data.today.total || 0;
-                document.getElementById('statPending').textContent = data.data.stats.pendingConfirmation || 0;
-                document.getElementById('statWeek').textContent = data.data.stats.weekTotal || 0;
-            }
-        }
+  return h('div', { className: 'sidebar' },
+    h('div', { className: 'sidebar-logo' },
+      h('div', { className: 'brand' }, 'GV AUTOMACOES'),
+      h('div', { className: 'title' }, 'Backoffice')
+    ),
+    h('nav', { className: 'sidebar-nav' },
+      navItems.map(function(item, i) {
+        return h('div', { key: item.id },
+          item.section ? h('div', { className: 'nav-section' }, item.section) : null,
+          h('button', {
+            className: 'nav-item' + (props.page === item.id ? ' active' : ''),
+            onClick: function() { props.onNavigate(item.id); }
+          },
+            h('span', { className: 'icon' }, item.icon),
+            item.label,
+            item.soon ? h('span', { className: 'soon' }, item.soon) : null
+          )
+        );
+      })
+    ),
+    h('div', { className: 'sidebar-footer' },
+      user ? h('div', { className: 'admin-info' },
+        h('div', { className: 'admin-name' }, user.name),
+        h('div', { className: 'admin-role' }, user.role)
+      ) : null,
+      h('button', { className: 'btn-logout', onClick: props.onLogout }, '+ Sair')
+    )
+  );
+}
 
-        async function loadDoctors() {
-            const data = await api('/api/doctors');
-            if (data?.success) {
-                doctors = data.data;
-                ['filterDoctor', 'modalDoctorSelect'].forEach(id => {
-                    const el = document.getElementById(id);
-                    el.innerHTML = '<option value="">Todos</option>' + doctors.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
-                });
-            }
-        }
+// ─── App Root ─────────────────────────────────────────────────
+function App() {
+  var token = getToken();
+  if (!token) {
+    window.location.href = '/admin/login.html';
+    return null;
+  }
 
-        async function loadServices() {
-            const data = await api('/api/services');
-            if (data?.success) {
-                services = data.data;
-                document.getElementById('modalServiceSelect').innerHTML = '<option value="">Selecione...</option>' + services.map(s => `<option value="${s.id}">${s.name} - R$ ${s.price}</option>`).join('');
-            }
-        }
+  var page = useState('dashboard');
+  var setPage = page[1];
+  page = page[0];
+  var user = useState(getUser());
+  user = user[0];
 
-        async function loadPatients() {
-            const data = await api('/api/patients');
-            if (data?.success) document.getElementById('statPatients').textContent = data.data.length;
-        }
+  function handleLogout() {
+    q('/api/admin/auth/logout', { method: 'POST' }).catch(function() {});
+    clearAuth();
+    window.location.href = '/admin/login.html';
+  }
 
-        async function loadAppointments() {
-            const date = document.getElementById('filterDate').value;
-            const doctor = document.getElementById('filterDoctor').value;
-            const status = document.getElementById('filterStatus').value;
-            
-            document.getElementById('loadingState').classList.remove('hidden');
-            document.getElementById('appointmentsTable').innerHTML = '';
-            document.getElementById('emptyState').classList.add('hidden');
-            
-            let url = '/api/appointments?';
-            if (date) url += `date=${date}&`;
-            if (doctor) url += `doctor_id=${doctor}&`;
-            if (status) url += `status=${status}&`;
-            
-            const data = await api(url);
-            document.getElementById('loadingState').classList.add('hidden');
-            
-            if (data?.success && data.data.length > 0) {
-                renderTable(data.data);
-            } else {
-                document.getElementById('emptyState').classList.remove('hidden');
-            }
-        }
+  var pageTitle = {
+    dashboard: 'Dashboard',
+    clinics: 'Clinicas',
+    usage: 'Uso de Tokens',
+    billing: 'Billing',
+    alerts: 'Alertas do Sistema'
+  };
 
-        function renderTable(appointments) {
-            const tbody = document.getElementById('appointmentsTable');
-            tbody.innerHTML = appointments.map(apt => {
-                const s = STATUS[apt.status] || STATUS.scheduled;
-                return `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-6 py-4">
-                            <p class="font-medium">${apt.start_time?.substring(0,5) || '-'}</p>
-                            <p class="text-xs text-gray-500">${formatDate(apt.appointment_date)}</p>
-                        </td>
-                        <td class="px-6 py-4">
-                            <p class="font-medium">${apt.patients?.name || '-'}</p>
-                            <p class="text-sm text-gray-500">${formatPhone(apt.patients?.phone)}</p>
-                        </td>
-                        <td class="px-6 py-4">
-                            <p>${apt.doctors?.name || '-'}</p>
-                        </td>
-                        <td class="px-6 py-4">
-                            <p>${apt.services?.name || '-'}</p>
-                            <p class="text-xs text-gray-500">R$ ${apt.price || 0}</p>
-                        </td>
-                        <td class="px-6 py-4">
-                            <span class="px-3 py-1 text-xs font-medium rounded-full ${s.bg} ${s.text}">${s.label}</span>
-                        </td>
-                        <td class="px-6 py-4">
-                            <div class="flex gap-1">
-                                ${apt.status === 'scheduled' ? `<button onclick="updateStatus('${apt.id}', 'confirmed')" class="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Confirmar"><i data-lucide="check" class="w-4 h-4"></i></button>` : ''}
-                                ${apt.status === 'confirmed' ? `<button onclick="updateStatus('${apt.id}', 'waiting')" class="p-2 text-yellow-600 hover:bg-yellow-50 rounded-lg" title="Chegou"><i data-lucide="user-check" class="w-4 h-4"></i></button>` : ''}
-                                ${apt.status === 'waiting' ? `<button onclick="updateStatus('${apt.id}', 'in_progress')" class="p-2 text-purple-600 hover:bg-purple-50 rounded-lg" title="Iniciar"><i data-lucide="play" class="w-4 h-4"></i></button>` : ''}
-                                ${apt.status === 'in_progress' ? `<button onclick="updateStatus('${apt.id}', 'completed')" class="p-2 text-gray-600 hover:bg-gray-100 rounded-lg" title="Finalizar"><i data-lucide="check-circle" class="w-4 h-4"></i></button>` : ''}
-                                ${['scheduled','confirmed'].includes(apt.status) ? `<button onclick="cancelApt('${apt.id}')" class="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Cancelar"><i data-lucide="x" class="w-4 h-4"></i></button>` : ''}
-                            </div>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
-            lucide.createIcons();
-        }
+  var pageSubtitle = {
+    dashboard: 'Visao geral da plataforma',
+    clinics: 'Gerencie todas as clinicas',
+    usage: 'Monitoramento de tokens OpenAI',
+    billing: 'Cobrancas e faturas',
+    alerts: 'Alertas e incidentes'
+  };
 
-        async function updateStatus(id, status) {
-            await api(`/api/appointments/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
-            showToast('Atualizado!');
-            loadAllData();
-        }
+  function renderPage() {
+    if (page === 'dashboard') return h(DashboardPage);
+    if (page === 'clinics') return h(ClinicsPage);
+    if (page === 'usage') return h(ComingSoonPage, {
+      icon: '~',
+      title: 'Uso de Tokens (F8B)',
+      description: 'Monitoramento de consumo de tokens OpenAI por clinica sera implementado no F8B.'
+    });
+    if (page === 'billing') return h(ComingSoonPage, {
+      icon: '$',
+      title: 'Billing (F8C)',
+      description: 'Integracao com Asaas e gestao de cobrancas sera implementada no F8C.'
+    });
+    if (page === 'alerts') return h(ComingSoonPage, {
+      icon: '!',
+      title: 'Alertas do Sistema (F8D)',
+      description: 'Central de alertas e incidentes da plataforma sera implementada no F8D.'
+    });
+    return null;
+  }
 
-        async function cancelApt(id) {
-            if (!confirm('Cancelar este agendamento?')) return;
-            await api(`/api/appointments/${id}`, { method: 'DELETE' });
-            showToast('Cancelado');
-            loadAllData();
-        }
+  return h('div', { id: 'root-inner', style: { display: 'flex', minHeight: '100vh', width: '100%' } },
+    h(Sidebar, {
+      page: page,
+      user: user,
+      onNavigate: setPage,
+      onLogout: handleLogout
+    }),
+    h('div', { className: 'main' },
+      h('div', { className: 'topbar' },
+        h('div', null,
+          h('h1', null, pageTitle[page] || page),
+          h('div', { className: 'sub' }, pageSubtitle[page] || '')
+        )
+      ),
+      h('div', { className: 'content' },
+        renderPage()
+      )
+    )
+  );
+}
 
-        async function handleNewAppointment(e) {
-            e.preventDefault();
-            const data = Object.fromEntries(new FormData(e.target).entries());
-            const result = await api('/api/appointments', { method: 'POST', body: JSON.stringify(data) });
-            if (result?.success) {
-                showToast('Agendamento criado!');
-                closeModal('newAppointmentModal');
-                e.target.reset();
-                loadAllData();
-            } else {
-                showToast(result?.error || 'Erro');
-            }
-        }
-
-        function openModal(id) { document.getElementById(id).classList.remove('hidden'); lucide.createIcons(); }
-        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
-        
-        function formatDate(d) { return d ? new Date(d + 'T00:00:00').toLocaleDateString('pt-BR') : '-'; }
-        function formatPhone(p) {
-            if (!p) return '-';
-            const c = p.replace(/\D/g, '');
-            return c.length === 11 ? `(${c.slice(0,2)}) ${c.slice(2,7)}-${c.slice(7)}` : p;
-        }
-        
-        function showToast(msg) {
-            document.getElementById('toastMessage').textContent = msg;
-            document.getElementById('toast').classList.remove('hidden');
-            setTimeout(() => document.getElementById('toast').classList.add('hidden'), 3000);
-        }
-
-        document.addEventListener('DOMContentLoaded', () => { lucide.createIcons(); fetchClinicInfo().then(() => checkAuth()); });
-    </script>
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
 </body>
 </html>
