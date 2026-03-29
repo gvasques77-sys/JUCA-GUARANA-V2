@@ -1,6 +1,7 @@
 // services/asaasService.js
 // Wrapper da API Asaas para operacoes de billing
 // Documentacao: https://docs.asaas.com
+// F8C - Billing integration
 
 import { createClient } from '@supabase/supabase-js';
 
