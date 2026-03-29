@@ -206,6 +206,10 @@
     .badge-starter { background: rgba(156,163,175,0.15); color: #9CA3AF; }
     .badge-pro { background: rgba(99,102,241,0.15); color: var(--accent); }
     .badge-enterprise { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .badge-pending { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .badge-received, .badge-confirmed { background: rgba(16,185,129,0.15); color: var(--success); }
+    .badge-overdue { background: rgba(239,68,68,0.12); color: var(--danger); }
+    .badge-refunded, .badge-cancelled { background: rgba(156,163,175,0.15); color: #9CA3AF; }
     .btn-action {
       padding: 5px 12px;
       border-radius: 6px;
@@ -1156,6 +1160,408 @@ function UsagePage() {
   );
 }
 
+// ─── Billing Page (F8C) ──────────────────────────────────────
+function formatBRL(value) {
+  return 'R$ ' + parseFloat(value || 0).toFixed(2).replace('.', ',');
+}
+
+function billingStatusLabel(status) {
+  var map = {
+    'PENDING': 'Pendente',
+    'RECEIVED': 'Pago',
+    'CONFIRMED': 'Confirmado',
+    'OVERDUE': 'Vencido',
+    'REFUNDED': 'Estornado',
+    'CANCELLED': 'Cancelado'
+  };
+  return map[status] || status;
+}
+
+function billingStatusClass(status) {
+  var map = {
+    'PENDING': 'badge-pending',
+    'RECEIVED': 'badge-received',
+    'CONFIRMED': 'badge-confirmed',
+    'OVERDUE': 'badge-overdue',
+    'REFUNDED': 'badge-refunded',
+    'CANCELLED': 'badge-cancelled'
+  };
+  return 'badge ' + (map[status] || 'badge-starter');
+}
+
+function BillingPage() {
+  var clinicsState = useState([]);
+  var clinics = clinicsState[0]; var setClinics = clinicsState[1];
+  var loadingState = useState(true);
+  var loading = loadingState[0]; var setLoading = loadingState[1];
+  var modalState = useState(null);
+  var modal = modalState[0]; var setModal = modalState[1];
+  var modalDataState = useState(null);
+  var modalData = modalDataState[0]; var setModalData = modalDataState[1];
+  var chargesState = useState([]);
+  var charges = chargesState[0]; var setCharges = chargesState[1];
+  var chargesLoadingState = useState(false);
+  var chargesLoading = chargesLoadingState[0]; var setChargesLoading = chargesLoadingState[1];
+  var savingState = useState(false);
+  var saving = savingState[0]; var setSaving = savingState[1];
+  var breakdownState = useState(null);
+  var breakdown = breakdownState[0]; var setBreakdown = breakdownState[1];
+
+  function loadClinics() {
+    setLoading(true);
+    q('/api/admin/clinics')
+      .then(function(data) {
+        setClinics(data.clinics || data || []);
+        setLoading(false);
+      })
+      .catch(function() { setLoading(false); });
+  }
+
+  useEffect(function() { loadClinics(); }, []);
+
+  // --- Cadastrar cliente Asaas ---
+  function openCadastrar(clinic) {
+    setModalData({ clinic_id: clinic.id, name: clinic.name, email: clinic.email || '', phone: '', cpf_cnpj: '' });
+    setModal('cadastrar');
+  }
+
+  function submitCadastrar() {
+    if (!modalData.name || !modalData.email) return;
+    setSaving(true);
+    q('/api/admin/billing/customers', {
+      method: 'POST',
+      body: JSON.stringify(modalData)
+    })
+      .then(function(res) {
+        setSaving(false);
+        if (res.error) { alert('Erro: ' + res.error); return; }
+        alert('Cliente cadastrado no Asaas com sucesso! ID: ' + res.customer.id);
+        setModal(null);
+        loadClinics();
+      })
+      .catch(function(err) { setSaving(false); alert('Erro: ' + err.message); });
+  }
+
+  // --- Ver cobrancas ---
+  function openCharges(clinic) {
+    var asaasId = clinic.billing && clinic.billing.asaas_customer_id;
+    if (!asaasId) { alert('Clinica nao cadastrada no Asaas. Cadastre primeiro.'); return; }
+    setModalData(clinic);
+    setChargesLoading(true);
+    setCharges([]);
+    setModal('charges');
+    q('/api/admin/billing/customers/' + asaasId + '/charges')
+      .then(function(res) {
+        setCharges(res.data || []);
+        setChargesLoading(false);
+      })
+      .catch(function() { setChargesLoading(false); });
+  }
+
+  function cancelCharge(chargeId) {
+    if (!confirm('Cancelar esta cobranca?')) return;
+    q('/api/admin/billing/charges/' + chargeId, { method: 'DELETE' })
+      .then(function() {
+        setCharges(charges.filter(function(c) { return c.id !== chargeId; }));
+      })
+      .catch(function(err) { alert('Erro: ' + err.message); });
+  }
+
+  // --- Nova cobranca manual ---
+  function openNovaCobranca() {
+    var today = new Date();
+    var dd = today.toISOString().substring(0, 10);
+    setModalData({ asaas_customer_id: '', value: '', due_date: dd, description: '', billing_type: 'UNDEFINED' });
+    setModal('nova_cobranca');
+  }
+
+  function submitNovaCobranca() {
+    if (!modalData.asaas_customer_id || !modalData.value || !modalData.due_date) {
+      alert('Preencha cliente, valor e vencimento.'); return;
+    }
+    setSaving(true);
+    q('/api/admin/billing/charges', {
+      method: 'POST',
+      body: JSON.stringify(modalData)
+    })
+      .then(function(res) {
+        setSaving(false);
+        if (res.error) { alert('Erro: ' + res.error); return; }
+        alert('Cobranca criada com sucesso! ID: ' + res.charge.id);
+        setModal(null);
+      })
+      .catch(function(err) { setSaving(false); alert('Erro: ' + err.message); });
+  }
+
+  // --- Gerar fatura automatica ---
+  function openGerarFatura(clinic) {
+    var asaasId = clinic.billing && clinic.billing.asaas_customer_id;
+    if (!asaasId) { alert('Clinica nao cadastrada no Asaas. Cadastre primeiro.'); return; }
+    var now = new Date();
+    setModalData({ clinic: clinic, year: now.getFullYear(), month: now.getMonth() + 1 });
+    setBreakdown(null);
+    setModal('gerar_fatura');
+  }
+
+  function submitGerarFatura() {
+    setSaving(true);
+    q('/api/admin/billing/generate/' + modalData.clinic.id, {
+      method: 'POST',
+      body: JSON.stringify({ year: modalData.year, month: modalData.month })
+    })
+      .then(function(res) {
+        setSaving(false);
+        if (res.error) { alert('Erro: ' + res.error); return; }
+        setBreakdown(res.breakdown);
+        alert('Fatura gerada com sucesso! Valor: ' + formatBRL(res.breakdown.total_brl));
+      })
+      .catch(function(err) { setSaving(false); alert('Erro: ' + err.message); });
+  }
+
+  // --- Helpers ---
+  var clinicsWithBilling = clinics.filter(function(c) { return c.billing && c.billing.asaas_customer_id; });
+  var months = ['Janeiro','Fevereiro','Marco','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var years = [2025, 2026, 2027];
+
+  function setField(field, val) {
+    var next = Object.assign({}, modalData);
+    next[field] = val;
+    setModalData(next);
+  }
+
+  // --- Render ---
+  return h('div', null,
+    // Toolbar
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' } },
+      h('button', { className: 'btn-primary', onClick: openNovaCobranca }, '+ Nova Cobranca Manual'),
+      h('span', { style: { marginLeft: 'auto', fontSize: '13px', color: 'var(--text-secondary)' } },
+        clinicsWithBilling.length + ' clinica(s) cadastrada(s) no Asaas'
+      )
+    ),
+
+    loading ? h(Loading) :
+    h('div', { className: 'table-wrap' },
+      h('table', null,
+        h('thead', null,
+          h('tr', null,
+            h('th', null, 'Clinica'),
+            h('th', null, 'Plano'),
+            h('th', null, 'Mensalidade'),
+            h('th', null, 'Cliente Asaas'),
+            h('th', null, 'Status'),
+            h('th', null, 'Acoes')
+          )
+        ),
+        h('tbody', null,
+          clinics.length === 0
+            ? h('tr', null, h('td', { colSpan: 6, style: { textAlign: 'center', color: 'var(--text-secondary)', padding: '40px', fontSize: '13px' } }, 'Nenhuma clinica encontrada.'))
+            : clinics.map(function(c) {
+                var b = c.billing || {};
+                var hasAsaas = !!b.asaas_customer_id;
+                return h('tr', { key: c.id },
+                  h('td', null,
+                    h('div', { style: { fontWeight: 600, fontSize: '14px' } }, c.name),
+                    h('div', { style: { fontSize: '11px', color: 'var(--text-secondary)' } }, c.id.substring(0, 8) + '...')
+                  ),
+                  h('td', null, b.plan ? h('span', { className: 'badge badge-' + b.plan }, b.plan) : h('span', { style: { color: 'var(--text-secondary)', fontSize: '12px' } }, '-')),
+                  h('td', null, b.monthly_fee ? formatBRL(b.monthly_fee) : '-'),
+                  h('td', null, hasAsaas
+                    ? h('span', { style: { fontSize: '12px', color: 'var(--success)' } }, b.asaas_customer_id.substring(0, 12) + '...')
+                    : h('span', { style: { fontSize: '12px', color: 'var(--text-secondary)' } }, 'Nao cadastrado')
+                  ),
+                  h('td', null, h('span', { className: 'badge ' + (c.is_active ? 'badge-active' : 'badge-inactive') }, c.is_active ? 'Ativo' : 'Inativo')),
+                  h('td', null,
+                    h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                      hasAsaas
+                        ? h('button', { className: 'btn-action', onClick: function() { openCharges(c); } }, 'Cobrancas')
+                        : null,
+                      hasAsaas
+                        ? h('button', { className: 'btn-action', onClick: function() { openGerarFatura(c); } }, 'Gerar Fatura')
+                        : h('button', { className: 'btn-action', style: { borderColor: 'var(--accent)', color: 'var(--accent)' }, onClick: function() { openCadastrar(c); } }, 'Cadastrar Asaas')
+                    )
+                  )
+                );
+              })
+        )
+      )
+    ),
+
+    // Modal: Cadastrar Cliente Asaas
+    modal === 'cadastrar' ? h('div', { className: 'modal-overlay', onClick: function(e) { if (e.target === e.currentTarget) setModal(null); } },
+      h('div', { className: 'modal', style: { maxWidth: '500px' } },
+        h('div', { className: 'modal-header' },
+          h('h2', null, 'Cadastrar Cliente no Asaas'),
+          h('button', { className: 'modal-close', onClick: function() { setModal(null); } }, 'x')
+        ),
+        h('div', { className: 'modal-body' },
+          h('div', { className: 'form-group' },
+            h('label', null, 'Nome'),
+            h('input', { className: 'form-input', value: modalData.name, onChange: function(e) { setField('name', e.target.value); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Email'),
+            h('input', { className: 'form-input', type: 'email', value: modalData.email, onChange: function(e) { setField('email', e.target.value); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Telefone'),
+            h('input', { className: 'form-input', value: modalData.phone, onChange: function(e) { setField('phone', e.target.value); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'CPF/CNPJ'),
+            h('input', { className: 'form-input', value: modalData.cpf_cnpj, onChange: function(e) { setField('cpf_cnpj', e.target.value); } })
+          ),
+          h('div', { style: { marginTop: '16px', textAlign: 'right' } },
+            h('button', { className: 'btn-primary', disabled: saving, onClick: submitCadastrar }, saving ? 'Cadastrando...' : 'Cadastrar no Asaas')
+          )
+        )
+      )
+    ) : null,
+
+    // Modal: Cobrancas do cliente
+    modal === 'charges' ? h('div', { className: 'modal-overlay', onClick: function(e) { if (e.target === e.currentTarget) setModal(null); } },
+      h('div', { className: 'modal', style: { maxWidth: '700px' } },
+        h('div', { className: 'modal-header' },
+          h('h2', null, 'Cobrancas - ' + (modalData && modalData.name || '')),
+          h('button', { className: 'modal-close', onClick: function() { setModal(null); } }, 'x')
+        ),
+        h('div', { className: 'modal-body' },
+          chargesLoading ? h(Loading) :
+          charges.length === 0
+            ? h('div', { style: { textAlign: 'center', color: 'var(--text-secondary)', padding: '24px' } }, 'Nenhuma cobranca encontrada.')
+            : h('div', { className: 'table-wrap' },
+                h('table', null,
+                  h('thead', null,
+                    h('tr', null,
+                      h('th', null, 'Descricao'),
+                      h('th', null, 'Valor'),
+                      h('th', null, 'Vencimento'),
+                      h('th', null, 'Status'),
+                      h('th', null, 'Link'),
+                      h('th', null, '')
+                    )
+                  ),
+                  h('tbody', null,
+                    charges.map(function(ch) {
+                      return h('tr', { key: ch.id },
+                        h('td', { style: { fontSize: '12px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, ch.description || '-'),
+                        h('td', null, formatBRL(ch.value)),
+                        h('td', null, ch.dueDate ? new Date(ch.dueDate + 'T12:00:00').toLocaleDateString('pt-BR') : '-'),
+                        h('td', null, h('span', { className: billingStatusClass(ch.status) }, billingStatusLabel(ch.status))),
+                        h('td', null,
+                          ch.invoiceUrl ? h('a', { href: ch.invoiceUrl, target: '_blank', style: { fontSize: '12px', color: 'var(--accent)' } }, 'Abrir') :
+                          ch.bankSlipUrl ? h('a', { href: ch.bankSlipUrl, target: '_blank', style: { fontSize: '12px', color: 'var(--accent)' } }, 'Boleto') :
+                          '-'
+                        ),
+                        h('td', null,
+                          ch.status === 'PENDING' || ch.status === 'OVERDUE'
+                            ? h('button', { className: 'btn-action', style: { color: 'var(--danger)', borderColor: 'var(--danger)' }, onClick: function() { cancelCharge(ch.id); } }, 'Cancelar')
+                            : null
+                        )
+                      );
+                    })
+                  )
+                )
+              )
+        )
+      )
+    ) : null,
+
+    // Modal: Nova Cobranca Manual
+    modal === 'nova_cobranca' ? h('div', { className: 'modal-overlay', onClick: function(e) { if (e.target === e.currentTarget) setModal(null); } },
+      h('div', { className: 'modal', style: { maxWidth: '500px' } },
+        h('div', { className: 'modal-header' },
+          h('h2', null, 'Nova Cobranca Manual'),
+          h('button', { className: 'modal-close', onClick: function() { setModal(null); } }, 'x')
+        ),
+        h('div', { className: 'modal-body' },
+          h('div', { className: 'form-group' },
+            h('label', null, 'Cliente Asaas'),
+            h('select', { className: 'form-input', value: modalData.asaas_customer_id, onChange: function(e) { setField('asaas_customer_id', e.target.value); } },
+              h('option', { value: '' }, '-- Selecione --'),
+              clinicsWithBilling.map(function(c) {
+                return h('option', { key: c.id, value: c.billing.asaas_customer_id }, c.name);
+              })
+            )
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Valor (R$)'),
+            h('input', { className: 'form-input', type: 'number', step: '0.01', value: modalData.value, onChange: function(e) { setField('value', parseFloat(e.target.value) || 0); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Vencimento'),
+            h('input', { className: 'form-input', type: 'date', value: modalData.due_date, onChange: function(e) { setField('due_date', e.target.value); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Descricao'),
+            h('input', { className: 'form-input', value: modalData.description, onChange: function(e) { setField('description', e.target.value); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Tipo de Cobranca'),
+            h('select', { className: 'form-input', value: modalData.billing_type, onChange: function(e) { setField('billing_type', e.target.value); } },
+              h('option', { value: 'UNDEFINED' }, 'Cliente escolhe'),
+              h('option', { value: 'BOLETO' }, 'Boleto'),
+              h('option', { value: 'PIX' }, 'Pix'),
+              h('option', { value: 'CREDIT_CARD' }, 'Cartao de Credito')
+            )
+          ),
+          h('div', { style: { marginTop: '16px', textAlign: 'right' } },
+            h('button', { className: 'btn-primary', disabled: saving, onClick: submitNovaCobranca }, saving ? 'Gerando...' : 'Gerar Cobranca')
+          )
+        )
+      )
+    ) : null,
+
+    // Modal: Gerar Fatura Automatica
+    modal === 'gerar_fatura' ? h('div', { className: 'modal-overlay', onClick: function(e) { if (e.target === e.currentTarget) setModal(null); } },
+      h('div', { className: 'modal', style: { maxWidth: '550px' } },
+        h('div', { className: 'modal-header' },
+          h('h2', null, 'Gerar Fatura - ' + (modalData && modalData.clinic ? modalData.clinic.name : '')),
+          h('button', { className: 'modal-close', onClick: function() { setModal(null); } }, 'x')
+        ),
+        h('div', { className: 'modal-body' },
+          h('div', { style: { display: 'flex', gap: '12px', marginBottom: '16px' } },
+            h('div', { className: 'form-group', style: { flex: 1 } },
+              h('label', null, 'Mes'),
+              h('select', { className: 'form-input', value: modalData.month, onChange: function(e) { setField('month', parseInt(e.target.value)); } },
+                months.map(function(m, i) { return h('option', { key: i + 1, value: i + 1 }, m); })
+              )
+            ),
+            h('div', { className: 'form-group', style: { flex: 1 } },
+              h('label', null, 'Ano'),
+              h('select', { className: 'form-input', value: modalData.year, onChange: function(e) { setField('year', parseInt(e.target.value)); } },
+                years.map(function(y) { return h('option', { key: y, value: y }, y); })
+              )
+            )
+          ),
+          breakdown ? h('div', { style: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', padding: '16px', marginBottom: '16px' } },
+            h('div', { style: { fontWeight: 600, marginBottom: '12px', fontSize: '14px' } }, 'Detalhamento da Fatura'),
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' } },
+              h('span', null, 'Mensalidade fixa'),
+              h('span', null, formatBRL(breakdown.monthly_fee))
+            ),
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' } },
+              h('span', null, 'Tokens IA (' + (breakdown.ai_tokens_input || 0).toLocaleString('pt-BR') + ' in / ' + (breakdown.ai_tokens_output || 0).toLocaleString('pt-BR') + ' out)'),
+              h('span', null, formatBRL(breakdown.ai_cost))
+            ),
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' } },
+              h('span', null, 'Templates (' + (breakdown.template_count || 0) + ' envios)'),
+              h('span', null, formatBRL(breakdown.template_cost))
+            ),
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 700, borderTop: '1px solid var(--border)', paddingTop: '8px', marginTop: '8px' } },
+              h('span', null, 'Total'),
+              h('span', { style: { color: 'var(--accent)' } }, formatBRL(breakdown.total_brl))
+            ),
+            h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' } }, 'Vencimento: ' + breakdown.due_date)
+          ) : null,
+          h('div', { style: { marginTop: '16px', textAlign: 'right' } },
+            h('button', { className: 'btn-primary', disabled: saving, onClick: submitGerarFatura }, saving ? 'Gerando fatura...' : (breakdown ? 'Fatura Gerada' : 'Gerar Fatura'))
+          )
+        )
+      )
+    ) : null
+  );
+}
+
 // ─── Coming Soon ──────────────────────────────────────────────
 function ComingSoonPage(props) {
   return h('div', { className: 'coming-soon' },
@@ -1173,7 +1579,7 @@ function Sidebar(props) {
     { id: 'dashboard', label: 'Dashboard', icon: 'o', section: 'PLATAFORMA' },
     { id: 'clinics', label: 'Clinicas', icon: '#', section: null },
     { id: 'usage', label: 'Uso de Tokens', icon: '~', section: null },
-    { id: 'billing', label: 'Billing', icon: '$', section: null, soon: 'F8C' },
+    { id: 'billing', label: 'Billing', icon: '$', section: null },
     { id: 'alerts', label: 'Alertas', icon: '!', section: null, soon: 'F8D' }
   ];
 
@@ -1247,11 +1653,7 @@ function App() {
     if (page === 'dashboard') return h(DashboardPage);
     if (page === 'clinics') return h(ClinicsPage);
     if (page === 'usage') return h(UsagePage);
-    if (page === 'billing') return h(ComingSoonPage, {
-      icon: '$',
-      title: 'Billing (F8C)',
-      description: 'Integracao com Asaas e gestao de cobrancas sera implementada no F8C.'
-    });
+    if (page === 'billing') return h(BillingPage);
     if (page === 'alerts') return h(ComingSoonPage, {
       icon: '!',
       title: 'Alertas do Sistema (F8D)',
