@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GV AUTOMACOES - Backoffice</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #070A0F;
+      color: #E8EAF0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 48px;
+      width: 100%;
+      max-width: 420px;
+    }
+    .logo {
+      font-size: 12px;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+    }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 32px; }
+    label { display: block; font-size: 13px; color: #9CA3AF; margin-bottom: 6px; }
+    input {
+      width: 100%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #E8EAF0;
+      font-size: 14px;
+      outline: none;
+      margin-bottom: 20px;
+    }
+    input:focus { border-color: rgba(99,102,241,0.6); }
+    button {
+      width: 100%;
+      background: #6366F1;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 13px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    button:hover { background: #4F46E5; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #FCA5A5;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      margin-top: 16px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <p class="logo">GV AUTOMACOES</p>
+    <h1>Backoffice</h1>
+    <div>
+      <label>Email</label>
+      <input type="email" id="email" placeholder="admin@gvautomacoes.com.br" autocomplete="email">
+      <label>Senha</label>
+      <input type="password" id="password" placeholder="..." autocomplete="current-password">
+      <button id="btnLogin" onclick="handleLogin()">Entrar</button>
+      <div class="error" id="errorMsg"></div>
+    </div>
+  </div>
+
+  <script>
+    var token = localStorage.getItem('gv_admin_token');
+    if (token) {
+      window.location.href = '/admin/';
+    }
+
+    function handleLogin() {
+      var email = document.getElementById('email').value;
+      var password = document.getElementById('password').value;
+      var btn = document.getElementById('btnLogin');
+      var errorEl = document.getElementById('errorMsg');
+
+      if (!email || !password) {
+        errorEl.textContent = 'Preencha email e senha.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Entrando...';
+      errorEl.style.display = 'none';
+
+      fetch('/api/admin/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: password })
+      })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.token) {
+          localStorage.setItem('gv_admin_token', data.token);
+          localStorage.setItem('gv_admin_user', JSON.stringify(data.admin));
+          window.location.href = '/admin/';
+        } else {
+          errorEl.textContent = data.error || 'Credenciais invalidas.';
+          errorEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Entrar';
+        }
+      })
+      .catch(function() {
+        errorEl.textContent = 'Erro de conexao. Tente novamente.';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Entrar';
+      });
+    }
+
+    document.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') handleLogin();
+    });
+  </script>
+</body>
+</html>

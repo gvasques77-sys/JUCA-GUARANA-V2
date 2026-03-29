@@ -20,6 +20,8 @@ import campaignRoutes from './routes/campaignRoutes.js';
 import { startCampaignScheduler } from './services/campaignService.js';
 import financialRoutes from './routes/financialRoutes.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
+import adminAuthRoutes from './routes/adminAuthRoutes.js';
+import adminClinicRoutes from './routes/adminClinicRoutes.js';
 
 
 
@@ -380,6 +382,12 @@ app.use('/crm/api/financial', authMiddleware(supabase), financialRoutes);
 
 // — CRM Dashboard API (montada aqui porque depende do supabase client) —
 app.use('/crm/api', createCrmApiRouter(supabase));
+
+// ======================================================
+// BACKOFFICE GV AUTOMAÇÕES (F8A)
+// ======================================================
+app.use('/api/admin/auth', adminAuthRoutes);
+app.use('/api/admin/clinics', adminClinicRoutes);
 
 
 
