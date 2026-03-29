@@ -23,6 +23,7 @@ import { authMiddleware } from './middleware/authMiddleware.js';
 import adminAuthRoutes from './routes/adminAuthRoutes.js';
 import adminClinicRoutes from './routes/adminClinicRoutes.js';
 import adminUsageRoutes from './routes/adminUsageRoutes.js';
+import adminBillingRoutes from './routes/adminBillingRoutes.js';
 import { trackAiUsage } from './services/usageTracker.js';
 
 
@@ -391,6 +392,7 @@ app.use('/crm/api', createCrmApiRouter(supabase));
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/clinics', adminClinicRoutes);
 app.use('/api/admin/usage', adminUsageRoutes);
+app.use('/api/admin/billing', adminBillingRoutes);
 
 
 
