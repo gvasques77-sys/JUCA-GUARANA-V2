@@ -1432,6 +1432,48 @@ function CampaignsPage(){
 
   function resetForm(){sFStep(1);sFData({name:'',description:'',template_name:'',template_language:'pt_BR'});sAudType('tags');sSelTagIds([]);sSelPatIds([]);sAudPats([]);sPatSrch('');sSchedType('now');sSchedDate('');sSchedTime('')}
   function goCreate(){resetForm();sView('create')}
+  function cancelCreate(){resetForm();sView('list')}
+
+  function toggleTag(tid){
+    var idx=selTagIds.indexOf(tid);
+    if(idx>=0){sSelTagIds(selTagIds.filter(function(x){return x!==tid}))}
+    else{sSelTagIds(selTagIds.concat([tid]))}
+  }
+
+  function togglePat(pid){
+    var idx=selPatIds.indexOf(pid);
+    if(idx>=0){sSelPatIds(selPatIds.filter(function(x){return x!==pid}))}
+    else{sSelPatIds(selPatIds.concat([pid]))}
+  }
+
+  function saveCampaign(andSend){
+    if(!fData.name||!fData.template_name){alert('Preencha nome e template.');return}
+    if(audPats.length===0){alert('Selecione pelo menos 1 destinat\u00e1rio.');return}
+    if(andSend&&schedType==='scheduled'&&(!schedDate||!schedTime)){alert('Preencha data e hora do agendamento.');return}
+    sSaving(true);
+    var schedAt=schedType==='scheduled'?schedDate+'T'+schedTime+':00':null;
+    var body={
+      name:fData.name,
+      description:fData.description,
+      template_name:fData.template_name,
+      template_language:fData.template_language,
+      template_components:[],
+      audience_snapshot:{type:audType,tag_ids:selTagIds,patient_ids:selPatIds,patients:audPats.map(function(p){return{id:p.id,name:p.name,phone:p.phone}})},
+      total_recipients:audPats.length,
+      scheduled_at:schedAt
+    };
+    q('/campaigns',{method:'POST',body:JSON.stringify(body)}).then(function(r){
+      if(!r||r.error){alert('Erro ao salvar: '+(r&&r.error||'tente novamente'));sSaving(false);return}
+      var cid=r.id||(r.data&&r.data.id);
+      if(andSend&&cid){
+        q('/campaigns/'+cid+'/send',{method:'POST'}).then(function(){
+          sSaving(false);resetForm();loadCamps();sView('list');
+        });
+      }else{
+        sSaving(false);resetForm();loadCamps();sView('list');
+      }
+    });
+  }
 
   function loadCamps(){
     sLd(true);
@@ -1452,6 +1494,39 @@ function CampaignsPage(){
     if(hasSending){_poll.current=setInterval(function(){loadCamps()},10000)}
     return function(){if(_poll.current)clearInterval(_poll.current)};
   },[camps]);
+
+  // Load tags and patients when entering create view
+  ue(function(){
+    if(view==='create'){
+      q('/tags').then(function(d){if(d&&Array.isArray(d))sAvTags(d);else if(d&&d.data)sAvTags(d.data);else sAvTags([])});
+      q('/patients').then(function(d){if(d&&Array.isArray(d))sAllPats(d);else if(d&&d.data)sAllPats(d.data);else sAllPats([])});
+    }
+  },[view]);
+
+  // Resolve audience patients when tags change
+  ue(function(){
+    if(view!=='create')return;
+    if(audType==='tags'&&selTagIds.length>0){
+      q('/patients').then(function(d){
+        var pts=d&&Array.isArray(d)?d:(d&&d.data?d.data:[]);
+        var matched=pts.filter(function(p){
+          if(!p.tags||!Array.isArray(p.tags))return false;
+          return p.tags.some(function(t){return selTagIds.indexOf(t.id||t.tag_id)>=0});
+        });
+        sAudPats(matched);
+        sSelPatIds(matched.map(function(p){return p.id}));
+      });
+    }else if(audType==='tags'){sAudPats([]);sSelPatIds([])}
+  },[selTagIds,audType,view]);
+
+  // Resolve audience for manual selection
+  ue(function(){
+    if(view!=='create')return;
+    if(audType==='manual'){
+      var matched=allPats.filter(function(p){return selPatIds.indexOf(p.id)>=0});
+      sAudPats(matched);
+    }
+  },[selPatIds,audType,allPats,view]);
 
   function openDetail(c){
     sSel(c);sMld(true);sMsgs([]);sView('detail');
@@ -1640,80 +1715,6 @@ function CampaignsPage(){
 
   // === VIEW: CREATE ===
   if(view==='create'){
-    function cancelCreate(){resetForm();sView('list')}
-
-    // Load tags and patients when entering create view
-    ue(function(){
-      if(view==='create'){
-        q('/tags').then(function(d){if(d&&Array.isArray(d))sAvTags(d);else if(d&&d.data)sAvTags(d.data);else sAvTags([])});
-        q('/patients').then(function(d){if(d&&Array.isArray(d))sAllPats(d);else if(d&&d.data)sAllPats(d.data);else sAllPats([])});
-      }
-    },[view]);
-
-    // Resolve audience patients when tags change
-    ue(function(){
-      if(audType==='tags'&&selTagIds.length>0){
-        q('/patients').then(function(d){
-          var pts=d&&Array.isArray(d)?d:(d&&d.data?d.data:[]);
-          var matched=pts.filter(function(p){
-            if(!p.tags||!Array.isArray(p.tags))return false;
-            return p.tags.some(function(t){return selTagIds.indexOf(t.id||t.tag_id)>=0});
-          });
-          sAudPats(matched);
-          sSelPatIds(matched.map(function(p){return p.id}));
-        });
-      }else if(audType==='tags'){sAudPats([]);sSelPatIds([])}
-    },[selTagIds,audType]);
-
-    // Resolve audience for manual selection
-    ue(function(){
-      if(audType==='manual'){
-        var matched=allPats.filter(function(p){return selPatIds.indexOf(p.id)>=0});
-        sAudPats(matched);
-      }
-    },[selPatIds,audType,allPats]);
-
-    function toggleTag(tid){
-      var idx=selTagIds.indexOf(tid);
-      if(idx>=0){sSelTagIds(selTagIds.filter(function(x){return x!==tid}))}
-      else{sSelTagIds(selTagIds.concat([tid]))}
-    }
-
-    function togglePat(pid){
-      var idx=selPatIds.indexOf(pid);
-      if(idx>=0){sSelPatIds(selPatIds.filter(function(x){return x!==pid}))}
-      else{sSelPatIds(selPatIds.concat([pid]))}
-    }
-
-    function saveCampaign(andSend){
-      if(!fData.name||!fData.template_name){alert('Preencha nome e template.');return}
-      if(audPats.length===0){alert('Selecione pelo menos 1 destinat\u00e1rio.');return}
-      if(andSend&&schedType==='scheduled'&&(!schedDate||!schedTime)){alert('Preencha data e hora do agendamento.');return}
-      sSaving(true);
-      var schedAt=schedType==='scheduled'?schedDate+'T'+schedTime+':00':null;
-      var body={
-        name:fData.name,
-        description:fData.description,
-        template_name:fData.template_name,
-        template_language:fData.template_language,
-        template_components:[],
-        audience_snapshot:{type:audType,tag_ids:selTagIds,patient_ids:selPatIds,patients:audPats.map(function(p){return{id:p.id,name:p.name,phone:p.phone}})},
-        total_recipients:audPats.length,
-        scheduled_at:schedAt
-      };
-      q('/campaigns',{method:'POST',body:JSON.stringify(body)}).then(function(r){
-        if(!r||r.error){alert('Erro ao salvar: '+(r&&r.error||'tente novamente'));sSaving(false);return}
-        var cid=r.id||r.data&&r.data.id;
-        if(andSend&&cid){
-          q('/campaigns/'+cid+'/send',{method:'POST'}).then(function(){
-            sSaving(false);resetForm();loadCamps();sView('list');
-          });
-        }else{
-          sSaving(false);resetForm();loadCamps();sView('list');
-        }
-      });
-    }
-
     var stepLabel=fStep===1?'Informa\u00e7\u00f5es B\u00e1sicas':fStep===2?'Selecionar Audi\u00eancia':'Agendamento';
     var filteredPats=allPats.filter(function(p){
       if(!patSrch)return true;
