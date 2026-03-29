@@ -19,7 +19,7 @@ router.use(superadminMiddleware);
 
 var supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // POST /api/admin/billing/customers — criar cliente no Asaas e salvar ID
