@@ -779,6 +779,7 @@ async function loadConversationState(supabase, clinicId, fromNumber) {
           preferred_date_iso: null,
           preferred_time: null,
           last_suggested_slots: [],
+          stuck_counter_off_topic: 0,
           last_activity_at: new Date().toISOString(),
         };
         await supabase.from('conversation_state').update({
@@ -3873,6 +3874,28 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       console.log(`[AFFIRMATION_OVERRIDE] '${envelope.message_text}' reclassificado: other→scheduling/continue_booking (booking_state=${conversationState?.booking_state})`);
       extracted.intent_group = 'scheduling';
       extracted.intent       = 'continue_booking';
+    }
+
+    // ======================================================
+    // SLOT SELECTION OVERRIDE: "10:30", "09:00" etc. — seleção de horário via
+    // botão interativo ou texto livre durante AWAITING_SLOTS / COLLECTING_TIME.
+    // Sem isto, o LLM classifica HH:MM como 'other' e o FIX3 rejeita a seleção.
+    // ======================================================
+    const _SLOT_TIME_RE = /^\d{1,2}:\d{2}$/;
+    const _isSlotTimeMsg = _SLOT_TIME_RE.test(envelope.message_text.trim());
+    const _isSlotWaitState = [
+      BOOKING_STATES.AWAITING_SLOTS,
+      BOOKING_STATES.COLLECTING_TIME,
+    ].includes(conversationState?.booking_state);
+    if (_isSlotTimeMsg && _isSlotWaitState) {
+      if (!extracted || extracted.intent_group === 'other' || extracted.confidence < 0.6) {
+        console.log(`[SLOT_OVERRIDE] '${envelope.message_text}' reclassificado como scheduling/continue_booking (booking_state=${conversationState?.booking_state})`);
+        extracted = extracted || {};
+        extracted.intent_group = 'scheduling';
+        extracted.intent       = 'continue_booking';
+        extracted.confidence   = 1.0;
+        extracted.slots        = { ...( extracted.slots || {}), preferred_time: envelope.message_text.trim() };
+      }
     }
 
     // ======================================================
