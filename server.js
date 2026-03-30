@@ -24,6 +24,8 @@ import adminAuthRoutes from './routes/adminAuthRoutes.js';
 import adminClinicRoutes from './routes/adminClinicRoutes.js';
 import adminUsageRoutes from './routes/adminUsageRoutes.js';
 import adminBillingRoutes from './routes/adminBillingRoutes.js';
+import adminAlertRoutes from './routes/adminAlertRoutes.js';
+import adminOnboardingRoutes from './routes/adminOnboardingRoutes.js';
 import { trackAiUsage } from './services/usageTracker.js';
 
 
@@ -393,6 +395,8 @@ app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/clinics', adminClinicRoutes);
 app.use('/api/admin/usage', adminUsageRoutes);
 app.use('/api/admin/billing', adminBillingRoutes);
+app.use('/api/admin/alerts', adminAlertRoutes);
+app.use('/api/admin', adminOnboardingRoutes);
 
 
 
