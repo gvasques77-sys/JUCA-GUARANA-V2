@@ -2920,6 +2920,7 @@ if (isEncerramento) {
 // e o usuário responde "ok"/"beleza"/"certo" etc., buscar datas diretamente
 // sem passar pelo LLM (que às vezes extrai 'other' para mensagens curtas).
 // ======================================================
+const _AFIRMACAO_RE = /^(ok|beleza|blz|certo|pode|pode ser|isso|ótimo|otimo|claro|combinado|tá|ta|tudo bem)\s*(!|\.|\s)*$/i;
 if (conversationState?.booking_state === BOOKING_STATES.AWAITING_SLOTS &&
     _AFIRMACAO_RE.test(envelope.message_text.trim())) {
   const _awDoctorId = conversationState.doctor_id;
@@ -3862,7 +3863,6 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
     // Sem isto o LLM às vezes extrai 'other' para afirmações curtas,
     // o que dispara o FIX3 e encerra o fluxo incorretamente.
     // ======================================================
-    const _AFIRMACAO_RE = /^(ok|beleza|blz|certo|pode|pode ser|isso|ótimo|otimo|claro|combinado|tá|ta|tudo bem)\s*(!|\.|\s)*$/i;
     const _isAfirmacao  = _AFIRMACAO_RE.test(envelope.message_text.trim());
     const _isActiveBookingNow = [
       BOOKING_STATES.COLLECTING_SPECIALTY, BOOKING_STATES.COLLECTING_DOCTOR,
