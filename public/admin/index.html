@@ -210,6 +210,18 @@
     .badge-received, .badge-confirmed { background: rgba(16,185,129,0.15); color: var(--success); }
     .badge-overdue { background: rgba(239,68,68,0.12); color: var(--danger); }
     .badge-refunded, .badge-cancelled { background: rgba(156,163,175,0.15); color: #9CA3AF; }
+    .badge-error { background: rgba(239,68,68,0.12); color: #EF4444; }
+    .badge-warning { background: rgba(245,158,11,0.15); color: #F59E0B; }
+    .badge-info { background: rgba(59,130,246,0.15); color: #3B82F6; }
+    .badge-superadmin { background: rgba(139,92,246,0.15); color: #8B5CF6; }
+    .badge-admin { background: rgba(59,130,246,0.15); color: #3B82F6; }
+    .badge-viewer { background: rgba(156,163,175,0.15); color: #9CA3AF; }
+    .badge-basic { background: rgba(156,163,175,0.15); color: #9CA3AF; }
+    .badge-premium { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .onboarding-success { background: var(--bg-card); border: 1px solid var(--success); border-radius: 12px; padding: 24px; margin-top: 20px; }
+    .onboarding-success h3 { color: var(--success); margin-bottom: 12px; }
+    .form-section { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+    .form-section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary); }
     .btn-action {
       padding: 5px 12px;
       border-radius: 6px;
@@ -1562,6 +1574,485 @@ function BillingPage() {
   );
 }
 
+// ─── Alerts Page (F8D) ───────────────────────────────────────
+function AlertsPage() {
+  var alertsState = useState([]);
+  var alerts = alertsState[0]; var setAlerts = alertsState[1];
+  var loadingState = useState(true);
+  var loading = loadingState[0]; var setLoading = loadingState[1];
+  var filterTypeState = useState('');
+  var filterType = filterTypeState[0]; var setFilterType = filterTypeState[1];
+  var filterStatusState = useState('false');
+  var filterStatus = filterStatusState[0]; var setFilterStatus = filterStatusState[1];
+  var filterClinicState = useState('');
+  var filterClinic = filterClinicState[0]; var setFilterClinic = filterClinicState[1];
+  var clinicsState = useState([]);
+  var clinicsList = clinicsState[0]; var setClinicsList = clinicsState[1];
+  var modalState = useState(false);
+  var showModal = modalState[0]; var setShowModal = modalState[1];
+  var formState = useState({ alert_type: 'info', source: 'internal', clinic_id: '', title: '', message: '' });
+  var form = formState[0]; var setForm = formState[1];
+  var savingState = useState(false);
+  var saving = savingState[0]; var setSaving = savingState[1];
+  var expandedState = useState(null);
+  var expanded = expandedState[0]; var setExpanded = expandedState[1];
+
+  function loadAlerts() {
+    setLoading(true);
+    var params = [];
+    if (filterType) params.push('alert_type=' + filterType);
+    if (filterStatus !== '') params.push('is_resolved=' + filterStatus);
+    if (filterClinic) params.push('clinic_id=' + filterClinic);
+    var qs = params.length > 0 ? '?' + params.join('&') : '';
+    q('/api/admin/alerts' + qs)
+      .then(function(data) { setAlerts(data.alerts || []); setLoading(false); })
+      .catch(function() { setLoading(false); });
+  }
+
+  useEffect(function() { loadAlerts(); }, [filterType, filterStatus, filterClinic]);
+  useEffect(function() {
+    q('/api/admin/clinics').then(function(data) { setClinicsList(data.clinics || data || []); }).catch(function() {});
+  }, []);
+
+  var unresolvedCount = alerts.filter(function(a) { return !a.is_resolved; }).length;
+
+  function resolveAlert(id) {
+    q('/api/admin/alerts/' + id + '/resolve', { method: 'PATCH' })
+      .then(function() { loadAlerts(); })
+      .catch(function(err) { alert('Erro: ' + err.message); });
+  }
+
+  function deleteAlert(id) {
+    if (!confirm('Remover este alerta?')) return;
+    q('/api/admin/alerts/' + id, { method: 'DELETE' })
+      .then(function() { loadAlerts(); })
+      .catch(function(err) { alert('Erro: ' + err.message); });
+  }
+
+  function setFormField(field, val) {
+    var next = Object.assign({}, form);
+    next[field] = val;
+    setForm(next);
+  }
+
+  function submitAlert() {
+    if (!form.title || !form.message) { alert('Preencha titulo e mensagem.'); return; }
+    setSaving(true);
+    q('/api/admin/alerts', { method: 'POST', body: JSON.stringify(form) })
+      .then(function(res) {
+        setSaving(false);
+        if (res.error) { alert('Erro: ' + res.error); return; }
+        setShowModal(false);
+        setForm({ alert_type: 'info', source: 'internal', clinic_id: '', title: '', message: '' });
+        loadAlerts();
+      })
+      .catch(function(err) { setSaving(false); alert('Erro: ' + err.message); });
+  }
+
+  var alertTypeIcon = { error: 'x', warning: '!', info: 'i' };
+
+  return h('div', null,
+    // Toolbar
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' } },
+      h('button', { className: 'btn-primary', onClick: function() { setShowModal(true); } }, '+ Novo Alerta'),
+      unresolvedCount > 0 ? h('span', { className: 'badge badge-error', style: { fontSize: '13px', padding: '4px 12px' } }, unresolvedCount + ' nao resolvido(s)') : null,
+      h('div', { style: { marginLeft: 'auto', display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+        h('select', { className: 'period-select', value: filterType, onChange: function(e) { setFilterType(e.target.value); } },
+          h('option', { value: '' }, 'Todos tipos'),
+          h('option', { value: 'error' }, 'Error'),
+          h('option', { value: 'warning' }, 'Warning'),
+          h('option', { value: 'info' }, 'Info')
+        ),
+        h('select', { className: 'period-select', value: filterStatus, onChange: function(e) { setFilterStatus(e.target.value); } },
+          h('option', { value: 'false' }, 'Nao resolvidos'),
+          h('option', { value: 'true' }, 'Resolvidos'),
+          h('option', { value: '' }, 'Todos')
+        ),
+        h('select', { className: 'period-select', value: filterClinic, onChange: function(e) { setFilterClinic(e.target.value); } },
+          h('option', { value: '' }, 'Todas clinicas'),
+          clinicsList.map(function(c) { return h('option', { key: c.id, value: c.id }, c.name); })
+        )
+      )
+    ),
+
+    loading ? h(Loading) :
+    alerts.length === 0
+      ? h('div', { style: { textAlign: 'center', color: 'var(--text-secondary)', padding: '60px 20px' } },
+          h('div', { style: { fontSize: '32px', marginBottom: '12px' } }, '!'),
+          h('p', null, 'Nenhum alerta encontrado com os filtros selecionados.')
+        )
+      : h('div', { className: 'table-wrap' },
+          h('table', null,
+            h('thead', null,
+              h('tr', null,
+                h('th', { style: { width: '50px' } }, 'Tipo'),
+                h('th', null, 'Titulo'),
+                h('th', null, 'Clinica'),
+                h('th', null, 'Fonte'),
+                h('th', null, 'Data'),
+                h('th', null, 'Status'),
+                h('th', null, 'Acoes')
+              )
+            ),
+            h('tbody', null,
+              alerts.map(function(a) {
+                var isExpanded = expanded === a.id;
+                return h(React.Fragment, { key: a.id },
+                  h('tr', { style: { cursor: 'pointer' }, onClick: function() { setExpanded(isExpanded ? null : a.id); } },
+                    h('td', null, h('span', { className: 'badge badge-' + a.alert_type, style: { fontWeight: 700 } }, alertTypeIcon[a.alert_type] || '?')),
+                    h('td', { style: { fontWeight: 600, fontSize: '13px' } }, a.title),
+                    h('td', { style: { fontSize: '12px' } }, a.clinic_name || '-'),
+                    h('td', null, h('span', { className: 'badge badge-starter' }, a.source)),
+                    h('td', { style: { fontSize: '12px' } }, formatDate(a.created_at)),
+                    h('td', null, a.is_resolved
+                      ? h('span', { className: 'badge badge-active' }, 'Resolvido')
+                      : h('span', { className: 'badge badge-' + a.alert_type }, 'Aberto')
+                    ),
+                    h('td', null,
+                      h('div', { style: { display: 'flex', gap: '4px' } },
+                        !a.is_resolved ? h('button', { className: 'btn-action', style: { color: 'var(--success)', borderColor: 'var(--success)' }, onClick: function(e) { e.stopPropagation(); resolveAlert(a.id); } }, 'Resolver') : null,
+                        h('button', { className: 'btn-action', style: { color: 'var(--danger)', borderColor: 'var(--danger)' }, onClick: function(e) { e.stopPropagation(); deleteAlert(a.id); } }, 'Remover')
+                      )
+                    )
+                  ),
+                  isExpanded ? h('tr', null,
+                    h('td', { colSpan: 7, style: { background: 'var(--bg-card)', padding: '16px', fontSize: '13px' } },
+                      h('div', { style: { marginBottom: '8px' } },
+                        h('strong', null, 'Mensagem: '),
+                        a.message
+                      ),
+                      a.metadata ? h('div', null,
+                        h('strong', null, 'Metadata: '),
+                        h('pre', { style: { fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', whiteSpace: 'pre-wrap' } }, JSON.stringify(a.metadata, null, 2))
+                      ) : null,
+                      a.resolved_at ? h('div', { style: { marginTop: '8px', color: 'var(--text-secondary)', fontSize: '12px' } }, 'Resolvido em: ' + formatDate(a.resolved_at)) : null
+                    )
+                  ) : null
+                );
+              })
+            )
+          )
+        ),
+
+    // Modal: Novo Alerta
+    showModal ? h('div', { className: 'modal-overlay', onClick: function(e) { if (e.target === e.currentTarget) setShowModal(false); } },
+      h('div', { className: 'modal', style: { maxWidth: '500px' } },
+        h('div', { className: 'modal-header' },
+          h('h2', null, 'Novo Alerta Manual'),
+          h('button', { className: 'modal-close', onClick: function() { setShowModal(false); } }, 'x')
+        ),
+        h('div', { className: 'modal-body' },
+          h('div', { className: 'form-group' },
+            h('label', null, 'Tipo'),
+            h('select', { className: 'form-input', value: form.alert_type, onChange: function(e) { setFormField('alert_type', e.target.value); } },
+              h('option', { value: 'error' }, 'Error'),
+              h('option', { value: 'warning' }, 'Warning'),
+              h('option', { value: 'info' }, 'Info')
+            )
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Fonte'),
+            h('select', { className: 'form-input', value: form.source, onChange: function(e) { setFormField('source', e.target.value); } },
+              h('option', { value: 'internal' }, 'Internal'),
+              h('option', { value: 'railway' }, 'Railway'),
+              h('option', { value: 'openai' }, 'OpenAI'),
+              h('option', { value: 'meta' }, 'Meta'),
+              h('option', { value: 'supabase' }, 'Supabase')
+            )
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Clinica (opcional)'),
+            h('select', { className: 'form-input', value: form.clinic_id, onChange: function(e) { setFormField('clinic_id', e.target.value); } },
+              h('option', { value: '' }, '-- Nenhuma --'),
+              clinicsList.map(function(c) { return h('option', { key: c.id, value: c.id }, c.name); })
+            )
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Titulo'),
+            h('input', { className: 'form-input', value: form.title, onChange: function(e) { setFormField('title', e.target.value); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Mensagem'),
+            h('textarea', { className: 'form-input', rows: 3, value: form.message, style: { resize: 'vertical' }, onChange: function(e) { setFormField('message', e.target.value); } })
+          ),
+          h('div', { style: { marginTop: '16px', textAlign: 'right' } },
+            h('button', { className: 'btn-primary', disabled: saving, onClick: submitAlert }, saving ? 'Criando...' : 'Criar Alerta')
+          )
+        )
+      )
+    ) : null
+  );
+}
+
+// ─── Onboarding Page (F8D) ───────────────────────────────────
+function OnboardingPage() {
+  var formState = useState({
+    clinic_name: '', clinic_phone: '',
+    owner_name: '', owner_email: '', owner_password: '',
+    plan: 'basic', monthly_fee: 0, billing_day: 1
+  });
+  var form = formState[0]; var setForm = formState[1];
+  var savingState = useState(false);
+  var saving = savingState[0]; var setSaving = savingState[1];
+  var resultState = useState(null);
+  var result = resultState[0]; var setResult = resultState[1];
+
+  function setField(field, val) {
+    var next = Object.assign({}, form);
+    next[field] = val;
+    setForm(next);
+  }
+
+  function submitOnboarding() {
+    if (!form.clinic_name || !form.owner_email || !form.owner_name || !form.owner_password) {
+      alert('Preencha todos os campos obrigatorios.'); return;
+    }
+    if (form.owner_password.length < 6) {
+      alert('Senha deve ter no minimo 6 caracteres.'); return;
+    }
+    setSaving(true);
+    setResult(null);
+    q('/api/admin/onboarding/clinic', { method: 'POST', body: JSON.stringify(form) })
+      .then(function(res) {
+        setSaving(false);
+        if (res.error) { alert('Erro: ' + res.error); return; }
+        setResult(res);
+      })
+      .catch(function(err) { setSaving(false); alert('Erro: ' + err.message); });
+  }
+
+  function resetForm() {
+    setForm({ clinic_name: '', clinic_phone: '', owner_name: '', owner_email: '', owner_password: '', plan: 'basic', monthly_fee: 0, billing_day: 1 });
+    setResult(null);
+  }
+
+  if (result) {
+    return h('div', null,
+      h('div', { className: 'onboarding-success' },
+        h('h3', null, 'Clinica criada com sucesso!'),
+        h('div', { style: { fontSize: '14px', lineHeight: '1.8' } },
+          h('div', null, 'Clinica: ' + h('strong', null, result.clinic.name) + ' (ID: ' + result.clinic.id.substring(0, 8) + '...)'),
+          h('div', null, 'Owner: ' + h('strong', null, result.owner.email) + ' (' + result.owner.name + ')')
+        ),
+        h('div', { style: { marginTop: '16px' } },
+          h('div', { style: { fontWeight: 600, marginBottom: '8px' } }, 'Proximos passos:'),
+          h('ul', { style: { margin: 0, paddingLeft: '20px', fontSize: '13px', color: 'var(--text-secondary)' } },
+            result.next_steps.map(function(step, i) { return h('li', { key: i, style: { marginBottom: '4px' } }, step); })
+          )
+        ),
+        h('div', { style: { marginTop: '20px' } },
+          h('button', { className: 'btn-primary', onClick: resetForm }, 'Criar outra clinica')
+        )
+      )
+    );
+  }
+
+  return h('div', null,
+    h('div', { style: { maxWidth: '600px' } },
+      // Secao 1: Dados da Clinica
+      h('div', { className: 'form-section' },
+        h('div', { className: 'form-section-title' }, 'Dados da Clinica'),
+        h('div', { className: 'form-group' },
+          h('label', null, 'Nome da Clinica *'),
+          h('input', { className: 'form-input', value: form.clinic_name, onChange: function(e) { setField('clinic_name', e.target.value); } })
+        )
+      ),
+
+      // Secao 2: Usuario Owner
+      h('div', { className: 'form-section' },
+        h('div', { className: 'form-section-title' }, 'Usuario Owner'),
+        h('div', { className: 'form-group' },
+          h('label', null, 'Nome completo *'),
+          h('input', { className: 'form-input', value: form.owner_name, onChange: function(e) { setField('owner_name', e.target.value); } })
+        ),
+        h('div', { className: 'form-group' },
+          h('label', null, 'Email *'),
+          h('input', { className: 'form-input', type: 'email', value: form.owner_email, onChange: function(e) { setField('owner_email', e.target.value); } })
+        ),
+        h('div', { className: 'form-group' },
+          h('label', null, 'Senha inicial *'),
+          h('input', { className: 'form-input', type: 'password', value: form.owner_password, onChange: function(e) { setField('owner_password', e.target.value); } }),
+          h('div', { style: { fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' } }, 'Minimo 6 caracteres')
+        )
+      ),
+
+      // Secao 3: Plano e Billing
+      h('div', { className: 'form-section' },
+        h('div', { className: 'form-section-title' }, 'Plano e Billing'),
+        h('div', { style: { display: 'flex', gap: '12px' } },
+          h('div', { className: 'form-group', style: { flex: 1 } },
+            h('label', null, 'Plano'),
+            h('select', { className: 'form-input', value: form.plan, onChange: function(e) { setField('plan', e.target.value); } },
+              h('option', { value: 'basic' }, 'Basic'),
+              h('option', { value: 'premium' }, 'Premium')
+            )
+          ),
+          h('div', { className: 'form-group', style: { flex: 1 } },
+            h('label', null, 'Mensalidade (R$)'),
+            h('input', { className: 'form-input', type: 'number', step: '0.01', value: form.monthly_fee, onChange: function(e) { setField('monthly_fee', parseFloat(e.target.value) || 0); } })
+          ),
+          h('div', { className: 'form-group', style: { flex: 1 } },
+            h('label', null, 'Dia cobranca'),
+            h('input', { className: 'form-input', type: 'number', min: 1, max: 28, value: form.billing_day, onChange: function(e) { setField('billing_day', parseInt(e.target.value) || 1); } })
+          )
+        )
+      ),
+
+      h('div', { style: { marginTop: '8px' } },
+        h('button', { className: 'btn-primary', disabled: saving, onClick: submitOnboarding }, saving ? 'Criando clinica...' : 'Criar Clinica')
+      )
+    )
+  );
+}
+
+// ─── GV Admins Page (F8D) ────────────────────────────────────
+function GvAdminsPage() {
+  var adminsState = useState([]);
+  var admins = adminsState[0]; var setAdmins = adminsState[1];
+  var loadingState = useState(true);
+  var loading = loadingState[0]; var setLoading = loadingState[1];
+  var modalState = useState(false);
+  var showModal = modalState[0]; var setShowModal = modalState[1];
+  var formState = useState({ name: '', email: '', password: '', role: 'admin' });
+  var form = formState[0]; var setForm = formState[1];
+  var savingState = useState(false);
+  var saving = savingState[0]; var setSaving = savingState[1];
+  var currentUser = getUser();
+  var isSuperadmin = currentUser && currentUser.role === 'superadmin';
+
+  function loadAdmins() {
+    setLoading(true);
+    q('/api/admin/gv-admins')
+      .then(function(data) { setAdmins(data.admins || []); setLoading(false); })
+      .catch(function() { setLoading(false); });
+  }
+
+  useEffect(function() { loadAdmins(); }, []);
+
+  function setFormField(field, val) {
+    var next = Object.assign({}, form);
+    next[field] = val;
+    setForm(next);
+  }
+
+  function submitNewAdmin() {
+    if (!form.name || !form.email || !form.password) { alert('Preencha todos os campos.'); return; }
+    if (form.password.length < 8) { alert('Senha deve ter no minimo 8 caracteres.'); return; }
+    setSaving(true);
+    q('/api/admin/gv-admins', { method: 'POST', body: JSON.stringify(form) })
+      .then(function(res) {
+        setSaving(false);
+        if (res.error) { alert('Erro: ' + res.error); return; }
+        setShowModal(false);
+        setForm({ name: '', email: '', password: '', role: 'admin' });
+        loadAdmins();
+      })
+      .catch(function(err) { setSaving(false); alert('Erro: ' + err.message); });
+  }
+
+  function toggleActive(admin) {
+    var newStatus = !admin.is_active;
+    q('/api/admin/gv-admins/' + admin.id, { method: 'PATCH', body: JSON.stringify({ is_active: newStatus }) })
+      .then(function(res) {
+        if (res.error) { alert('Erro: ' + res.error); return; }
+        loadAdmins();
+      })
+      .catch(function(err) { alert('Erro: ' + err.message); });
+  }
+
+  function removeAdmin(admin) {
+    if (!confirm('Remover admin ' + admin.name + '?')) return;
+    q('/api/admin/gv-admins/' + admin.id, { method: 'DELETE' })
+      .then(function(res) {
+        if (res.error) { alert('Erro: ' + res.error); return; }
+        loadAdmins();
+      })
+      .catch(function(err) { alert('Erro: ' + err.message); });
+  }
+
+  return h('div', null,
+    // Toolbar
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' } },
+      isSuperadmin ? h('button', { className: 'btn-primary', onClick: function() { setShowModal(true); } }, '+ Novo Admin') : null,
+      h('span', { style: { marginLeft: 'auto', fontSize: '13px', color: 'var(--text-secondary)' } }, admins.length + ' admin(s) cadastrado(s)')
+    ),
+
+    loading ? h(Loading) :
+    h('div', { className: 'table-wrap' },
+      h('table', null,
+        h('thead', null,
+          h('tr', null,
+            h('th', null, 'Nome'),
+            h('th', null, 'Email'),
+            h('th', null, 'Role'),
+            h('th', null, 'Status'),
+            h('th', null, 'Ultimo login'),
+            isSuperadmin ? h('th', null, 'Acoes') : null
+          )
+        ),
+        h('tbody', null,
+          admins.length === 0
+            ? h('tr', null, h('td', { colSpan: isSuperadmin ? 6 : 5, style: { textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' } }, 'Nenhum admin encontrado.'))
+            : admins.map(function(a) {
+                var isMe = currentUser && currentUser.adminId === a.id;
+                return h('tr', { key: a.id },
+                  h('td', null,
+                    h('span', { style: { fontWeight: 600 } }, a.name),
+                    isMe ? h('span', { style: { fontSize: '11px', color: 'var(--accent)', marginLeft: '6px' } }, '(Voce)') : null
+                  ),
+                  h('td', { style: { fontSize: '13px' } }, a.email),
+                  h('td', null, h('span', { className: 'badge badge-' + a.role }, a.role)),
+                  h('td', null, h('span', { className: 'badge ' + (a.is_active ? 'badge-active' : 'badge-inactive') }, a.is_active ? 'Ativo' : 'Inativo')),
+                  h('td', { style: { fontSize: '12px', color: 'var(--text-secondary)' } }, a.last_login_at ? formatDate(a.last_login_at) : 'Nunca'),
+                  isSuperadmin ? h('td', null,
+                    !isMe ? h('div', { style: { display: 'flex', gap: '4px' } },
+                      h('button', { className: 'btn-action', onClick: function() { toggleActive(a); } }, a.is_active ? 'Desativar' : 'Ativar'),
+                      h('button', { className: 'btn-action', style: { color: 'var(--danger)', borderColor: 'var(--danger)' }, onClick: function() { removeAdmin(a); } }, 'Remover')
+                    ) : null
+                  ) : null
+                );
+              })
+        )
+      )
+    ),
+
+    // Modal: Novo Admin
+    showModal ? h('div', { className: 'modal-overlay', onClick: function(e) { if (e.target === e.currentTarget) setShowModal(false); } },
+      h('div', { className: 'modal', style: { maxWidth: '450px' } },
+        h('div', { className: 'modal-header' },
+          h('h2', null, 'Novo Admin GV'),
+          h('button', { className: 'modal-close', onClick: function() { setShowModal(false); } }, 'x')
+        ),
+        h('div', { className: 'modal-body' },
+          h('div', { className: 'form-group' },
+            h('label', null, 'Nome'),
+            h('input', { className: 'form-input', value: form.name, onChange: function(e) { setFormField('name', e.target.value); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Email'),
+            h('input', { className: 'form-input', type: 'email', value: form.email, onChange: function(e) { setFormField('email', e.target.value); } })
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Senha'),
+            h('input', { className: 'form-input', type: 'password', value: form.password, onChange: function(e) { setFormField('password', e.target.value); } }),
+            h('div', { style: { fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' } }, 'Minimo 8 caracteres')
+          ),
+          h('div', { className: 'form-group' },
+            h('label', null, 'Role'),
+            h('select', { className: 'form-input', value: form.role, onChange: function(e) { setFormField('role', e.target.value); } },
+              h('option', { value: 'admin' }, 'Admin'),
+              h('option', { value: 'viewer' }, 'Viewer')
+            )
+          ),
+          h('div', { style: { marginTop: '16px', textAlign: 'right' } },
+            h('button', { className: 'btn-primary', disabled: saving, onClick: submitNewAdmin }, saving ? 'Criando...' : 'Criar Admin')
+          )
+        )
+      )
+    ) : null
+  );
+}
+
 // ─── Coming Soon ──────────────────────────────────────────────
 function ComingSoonPage(props) {
   return h('div', { className: 'coming-soon' },
@@ -1580,7 +2071,9 @@ function Sidebar(props) {
     { id: 'clinics', label: 'Clinicas', icon: '#', section: null },
     { id: 'usage', label: 'Uso de Tokens', icon: '~', section: null },
     { id: 'billing', label: 'Billing', icon: '$', section: null },
-    { id: 'alerts', label: 'Alertas', icon: '!', section: null, soon: 'F8D' }
+    { id: 'alerts', label: 'Alertas', icon: '!', section: null },
+    { id: 'onboarding', label: 'Nova Clinica', icon: '+', section: 'GESTAO' },
+    { id: 'gv-admins', label: 'Admins GV', icon: '@', section: null }
   ];
 
   return h('div', { className: 'sidebar' },
@@ -1638,7 +2131,9 @@ function App() {
     clinics: 'Clinicas',
     usage: 'Uso de Tokens',
     billing: 'Billing',
-    alerts: 'Alertas do Sistema'
+    alerts: 'Alertas do Sistema',
+    onboarding: 'Nova Clinica',
+    'gv-admins': 'Admins GV'
   };
 
   var pageSubtitle = {
@@ -1646,7 +2141,9 @@ function App() {
     clinics: 'Gerencie todas as clinicas',
     usage: 'Monitoramento de tokens OpenAI',
     billing: 'Cobrancas e faturas',
-    alerts: 'Alertas e incidentes'
+    alerts: 'Alertas e incidentes',
+    onboarding: 'Cadastre uma nova clinica na plataforma CLINICORE',
+    'gv-admins': 'Gerencie usuarios do backoffice'
   };
 
   function renderPage() {
@@ -1654,11 +2151,9 @@ function App() {
     if (page === 'clinics') return h(ClinicsPage);
     if (page === 'usage') return h(UsagePage);
     if (page === 'billing') return h(BillingPage);
-    if (page === 'alerts') return h(ComingSoonPage, {
-      icon: '!',
-      title: 'Alertas do Sistema (F8D)',
-      description: 'Central de alertas e incidentes da plataforma sera implementada no F8D.'
-    });
+    if (page === 'alerts') return h(AlertsPage);
+    if (page === 'onboarding') return h(OnboardingPage);
+    if (page === 'gv-admins') return h(GvAdminsPage);
     return null;
   }
 
