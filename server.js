@@ -3895,6 +3895,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         extracted.intent       = 'continue_booking';
         extracted.confidence   = 1.0;
         extracted.slots        = { ...( extracted.slots || {}), preferred_time: envelope.message_text.trim() };
+        // Sync in-memory so the injector at the end of the pipeline sees preferred_time set
+        if (updatedState) updatedState.preferred_time = envelope.message_text.trim();
       }
     }
 
@@ -5434,7 +5436,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
     // Se o LLM apresentou horários mas não gerou lista interativa, injetar aqui
     const finalActions = decided.actions ?? [];
     const hasTimeList = finalActions.some(a => a.type === 'send_interactive_list');
-    if (!hasTimeList && updatedState?.booking_state === BOOKING_STATES.AWAITING_SLOTS) {
+    if (!hasTimeList && updatedState?.booking_state === BOOKING_STATES.AWAITING_SLOTS && !updatedState?.preferred_time) {
       const sugSlotsFinal = updatedState?.last_suggested_slots || [];
       if (sugSlotsFinal.length > 0) {
         const doctorDisplayFinal = updatedState?.doctor_name || 'Médico selecionado';
