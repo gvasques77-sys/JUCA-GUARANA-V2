@@ -10,6 +10,8 @@ import { Router } from 'express';
 import * as campaignService from '../services/campaignService.js';
 import { checkClinicWhatsAppStatus } from '../services/whatsappConfigHelper.js';
 
+const VALID_AUDIENCE_TYPES = ['by_score', 'by_score_and_tags', 'by_tags', 'manual', 'segment', null, undefined];
+
 const router = Router();
 
 // ============================================================
@@ -66,7 +68,42 @@ router.get('/', async function(req, res) {
 // ============================================================
 router.get('/audience-preview', async function(req, res) {
   try {
+    const audienceType = req.query.audience_type || null;
     const segmentId = req.query.segment_id || null;
+
+    // Suporte a filtro por score (TAREFA 2.5)
+    if (audienceType === 'by_score' || audienceType === 'by_score_and_tags') {
+      const minLeadScore = parseInt(req.query.min_lead_score);
+      if (isNaN(minLeadScore) || minLeadScore < 0 || minLeadScore > 100) {
+        return res.status(400).json({ error: 'min_lead_score deve ser um inteiro entre 0 e 100' });
+      }
+
+      const tagIds = req.query.tag_ids ? req.query.tag_ids.split(',').filter(Boolean) : [];
+      const minScoreLabel = campaignService.scoreToLabel(minLeadScore);
+
+      const result = await campaignService.previewAudience(req.clinicId, {
+        audienceType, minLeadScore, tagIds, segmentId: null,
+      });
+
+      // Mascarar nomes (só primeiro nome + inicial — LGPD)
+      const sampleNames = (result.count > 0 && result.sample)
+        ? result.sample.map(function(p) {
+            const parts = (p.name || '').trim().split(/\s+/);
+            return parts.length > 1 ? parts[0] + ' ' + parts[parts.length - 1][0] + '.' : parts[0];
+          })
+        : [];
+
+      return res.json({
+        total_patients: result.count,
+        min_lead_score: minLeadScore,
+        min_score_label: minScoreLabel,
+        sample_count: sampleNames.length,
+        sample_names: sampleNames,
+        error: result.error || null,
+      });
+    }
+
+    // Comportamento original (por segmento)
     const result = await campaignService.previewAudience(req.clinicId, segmentId);
     res.json({ count: result.count, sample: result.sample, error: result.error || null });
   } catch (err) {
@@ -114,6 +151,23 @@ router.post('/', async function(req, res) {
       }
     }
 
+    const audienceType = body.audience_type || null;
+
+    // Validação do filtro por score
+    let minLeadScore = 0;
+    let minScoreLabel = null;
+    if (audienceType === 'by_score' || audienceType === 'by_score_and_tags') {
+      if (body.min_lead_score == null) {
+        return res.status(400).json({ error: 'min_lead_score e obrigatorio quando audience_type e "' + audienceType + '"' });
+      }
+      minLeadScore = parseInt(body.min_lead_score);
+      if (isNaN(minLeadScore) || minLeadScore < 0 || minLeadScore > 100) {
+        return res.status(400).json({ error: 'min_lead_score deve ser um inteiro entre 0 e 100' });
+      }
+      // Calcular label no backend — nunca confiar no cliente
+      minScoreLabel = campaignService.scoreToLabel(minLeadScore);
+    }
+
     const data = {
       clinic_id: req.clinicId,
       created_by: req.userId,
@@ -124,7 +178,11 @@ router.post('/', async function(req, res) {
       template_category: body.template_category || null,
       template_components: body.template_components || [],
       segment_id: body.segment_id || null,
-      scheduled_at: body.scheduled_at || null
+      scheduled_at: body.scheduled_at || null,
+      audience_type: audienceType,
+      min_lead_score: minLeadScore,
+      min_score_label: minScoreLabel,
+      tag_ids: Array.isArray(body.tag_ids) ? body.tag_ids : [],
     };
 
     const result = await campaignService.createCampaign(data);

@@ -79,7 +79,12 @@ export async function createCampaign(data) {
     const config = await getClinicWhatsAppConfig(data.clinic_id);
     if (!config) return { success: false, error: 'WhatsApp nao configurado para esta clinica. Configure as credenciais antes de criar campanhas.' };
 
-    const audience = await resolveAudience(data.clinic_id, data.segment_id);
+    const audience = await resolveAudience(data.clinic_id, {
+      segmentId:    data.segment_id || null,
+      audienceType: data.audience_type || null,
+      minLeadScore: data.min_lead_score != null ? data.min_lead_score : 0,
+      tagIds:       data.tag_ids || [],
+    });
     if (!audience.success) return { success: false, error: 'Erro ao resolver audiencia: ' + audience.error };
     if (audience.patients.length === 0) return { success: false, error: 'Nenhum paciente encontrado no segmento selecionado' };
 
@@ -94,7 +99,9 @@ export async function createCampaign(data) {
       template_category: data.template_category || null, template_components: data.template_components || [],
       segment_id: data.segment_id || null, audience_snapshot: audience.filter_snapshot,
       total_recipients: audience.patients.length, status: initialStatus,
-      scheduled_at: data.scheduled_at || null, created_by: data.created_by
+      scheduled_at: data.scheduled_at || null, created_by: data.created_by,
+      min_lead_score: data.min_lead_score != null ? data.min_lead_score : 0,
+      min_score_label: data.min_score_label || null,
     };
 
     const { data: campaign, error: campErr } = await sb.from('crm_campaigns').insert(campaignInsert).select().single();
@@ -123,10 +130,36 @@ export async function createCampaign(data) {
 // ============================================================
 // Resolucao de Audiencia
 // ============================================================
-async function resolveAudience(clinicId, segmentId) {
+
+/**
+ * Resolve a lista de pacientes para uma campanha.
+ * @param {string} clinicId
+ * @param {object} opts
+ * @param {string|null}   opts.segmentId    - ID de segmento salvo (crm_segments)
+ * @param {string|null}   opts.audienceType - 'by_score' | 'by_score_and_tags' | null (todos)
+ * @param {number}        opts.minLeadScore - Score mínimo (padrão 0)
+ * @param {string[]}      opts.tagIds       - Array de tag_ids para 'by_score_and_tags'
+ */
+async function resolveAudience(clinicId, opts) {
+  // Suporte a chamadas legadas com segmentId como segundo argumento
+  if (typeof opts === 'string' || opts == null) {
+    opts = { segmentId: opts || null, audienceType: null, minLeadScore: 0, tagIds: [] };
+  }
+  const { segmentId, audienceType, minLeadScore = 0, tagIds = [] } = opts;
+
   try {
+    // — Audiência por score mínimo —
+    if (audienceType === 'by_score') {
+      return resolveByScore(clinicId, minLeadScore);
+    }
+
+    // — Audiência por score + tags —
+    if (audienceType === 'by_score_and_tags') {
+      return resolveByScoreAndTags(clinicId, minLeadScore, tagIds);
+    }
+
+    // — Audiência por segmento salvo (comportamento original) —
     if (segmentId) {
-      // crm_segments may not exist yet — handle gracefully
       try {
         const { data: segment, error: segErr } = await sb.from('crm_segments').select('id, name, filters').eq('id', segmentId).eq('clinic_id', clinicId).single();
         if (segErr || !segment) return { success: false, error: 'Segmento nao encontrado', patients: [] };
@@ -136,11 +169,62 @@ async function resolveAudience(clinicId, segmentId) {
       } catch (e) {
         return { success: false, error: 'Segmentos nao disponiveis: ' + e.message, patients: [] };
       }
-    } else {
-      const { data: patients, error: patErr } = await sb.from('patients').select('id, name, phone').eq('clinic_id', clinicId).not('phone', 'is', null).neq('phone', '');
-      if (patErr) return { success: false, error: patErr.message, patients: [] };
-      return { success: true, patients: patients || [], filter_snapshot: { segment_id: null, segment_name: 'Todos os pacientes', filters: {} } };
     }
+
+    // — Todos os pacientes (fallback) —
+    const { data: patients, error: patErr } = await sb.from('patients').select('id, name, phone').eq('clinic_id', clinicId).not('phone', 'is', null).neq('phone', '');
+    if (patErr) return { success: false, error: patErr.message, patients: [] };
+    return { success: true, patients: patients || [], filter_snapshot: { segment_id: null, segment_name: 'Todos os pacientes', filters: {} } };
+  } catch (err) { return { success: false, error: err.message, patients: [] }; }
+}
+
+/** Pacientes com lead_score >= minLeadScore */
+async function resolveByScore(clinicId, minLeadScore) {
+  try {
+    const { data: projections, error } = await sb
+      .from('patient_crm_projection')
+      .select('patient_id')
+      .eq('clinic_id', clinicId)
+      .gte('lead_score', minLeadScore);
+
+    if (error) return { success: false, error: error.message, patients: [] };
+    if (!projections || projections.length === 0) return { success: true, patients: [], filter_snapshot: { audience_type: 'by_score', min_lead_score: minLeadScore } };
+
+    const patientIds = projections.map(function(p) { return p.patient_id; });
+    const { data: patients, error: patErr } = await sb.from('patients').select('id, name, phone').eq('clinic_id', clinicId).in('id', patientIds).not('phone', 'is', null).neq('phone', '');
+    if (patErr) return { success: false, error: patErr.message, patients: [] };
+    return { success: true, patients: patients || [], filter_snapshot: { audience_type: 'by_score', min_lead_score: minLeadScore } };
+  } catch (err) { return { success: false, error: err.message, patients: [] }; }
+}
+
+/** Pacientes com lead_score >= minLeadScore E que possuem todas as tags informadas */
+async function resolveByScoreAndTags(clinicId, minLeadScore, tagIds) {
+  try {
+    if (!tagIds || tagIds.length === 0) return resolveByScore(clinicId, minLeadScore);
+
+    // Pacientes com o score mínimo
+    const { data: projections, error: projErr } = await sb
+      .from('patient_crm_projection')
+      .select('patient_id')
+      .eq('clinic_id', clinicId)
+      .gte('lead_score', minLeadScore);
+    if (projErr) return { success: false, error: projErr.message, patients: [] };
+    if (!projections || projections.length === 0) return { success: true, patients: [], filter_snapshot: { audience_type: 'by_score_and_tags', min_lead_score: minLeadScore, tag_ids: tagIds } };
+
+    const scorePatientIds = new Set(projections.map(function(p) { return p.patient_id; }));
+
+    // Pacientes com as tags solicitadas (patient_tags usa tag_id como FK)
+    const { data: taggedPatients, error: tagErr } = await sb.from('patient_tags').select('patient_id').eq('clinic_id', clinicId).in('tag_id', tagIds);
+    if (tagErr) return { success: false, error: tagErr.message, patients: [] };
+    const tagPatientIds = new Set((taggedPatients || []).map(function(t) { return t.patient_id; }));
+
+    // Interseção: paciente precisa ter score E tag(s)
+    const eligibleIds = Array.from(scorePatientIds).filter(function(id) { return tagPatientIds.has(id); });
+    if (eligibleIds.length === 0) return { success: true, patients: [], filter_snapshot: { audience_type: 'by_score_and_tags', min_lead_score: minLeadScore, tag_ids: tagIds } };
+
+    const { data: patients, error: patErr } = await sb.from('patients').select('id, name, phone').eq('clinic_id', clinicId).in('id', eligibleIds).not('phone', 'is', null).neq('phone', '');
+    if (patErr) return { success: false, error: patErr.message, patients: [] };
+    return { success: true, patients: patients || [], filter_snapshot: { audience_type: 'by_score_and_tags', min_lead_score: minLeadScore, tag_ids: tagIds } };
   } catch (err) { return { success: false, error: err.message, patients: [] }; }
 }
 
@@ -292,7 +376,7 @@ export async function processStatusWebhook(wamid, newStatus, timestamp, errorInf
 // ============================================================
 export async function listCampaigns(clinicId, options) {
   const opts = options || {};
-  let query = sb.from('crm_campaigns').select('id, name, description, template_name, template_category, status, total_recipients, sent_count, delivered_count, read_count, failed_count, scheduled_at, started_at, completed_at, created_at, segment_id').eq('clinic_id', clinicId).order('created_at', { ascending: false }).range(opts.offset || 0, (opts.offset || 0) + (opts.limit || 20) - 1);
+  let query = sb.from('crm_campaigns').select('id, name, description, template_name, template_category, status, total_recipients, sent_count, delivered_count, read_count, failed_count, scheduled_at, started_at, completed_at, created_at, segment_id, min_lead_score, min_score_label').eq('clinic_id', clinicId).order('created_at', { ascending: false }).range(opts.offset || 0, (opts.offset || 0) + (opts.limit || 20) - 1);
   if (opts.status) query = query.eq('status', opts.status);
   const { data, error } = await query;
   return error ? { success: false, error: error.message } : { success: true, campaigns: data || [] };
@@ -329,12 +413,17 @@ async function calculateConversionRate(campaignId) {
   } catch (err) { return { rate: 0, count: 0 }; }
 }
 
-export async function previewAudience(clinicId, segmentId) {
-  const audience = await resolveAudience(clinicId, segmentId);
+export async function previewAudience(clinicId, opts) {
+  // Suporte a chamada legada: previewAudience(clinicId, segmentId)
+  if (typeof opts === 'string' || opts == null) {
+    opts = { segmentId: opts || null, audienceType: null, minLeadScore: 0, tagIds: [] };
+  }
+  const audience = await resolveAudience(clinicId, opts);
   return {
-    success: audience.success, count: audience.patients ? audience.patients.length : 0,
+    success: audience.success,
+    count: audience.patients ? audience.patients.length : 0,
     sample: audience.patients ? audience.patients.slice(0, 5).map(function(p) { return { id: p.id, name: p.name, phone: maskPhone(p.phone) }; }) : [],
-    error: audience.error
+    error: audience.error,
   };
 }
 
@@ -365,3 +454,14 @@ export function stopCampaignScheduler() { if (schedulerInterval) { clearInterval
 // HELPERS
 function sleep(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
 function maskPhone(phone) { if (!phone || phone.length < 8) return phone; return phone.substring(0, 4) + '****' + phone.substring(phone.length - 2); }
+
+/**
+ * Converte um lead_score numérico em label semântico.
+ * Espelhado de crmService.getScoreLabel para uso local sem import circular.
+ */
+export function scoreToLabel(score) {
+  if (score >= 70) return 'QUENTE';
+  if (score >= 40) return 'MORNO';
+  if (score >= 15) return 'FRIO';
+  return 'INATIVO';
+}
