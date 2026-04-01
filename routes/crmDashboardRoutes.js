@@ -33,6 +33,7 @@
 
 import { Router } from 'express';
 import { authMiddleware, requireOwner } from '../middleware/authMiddleware.js';
+import { calculateLeadScore, getScoreLabel } from '../services/crmService.js';
 
 // Helper: retorna "hoje" no timezone correto (evita UTC ≠ horário local)
 function todayInTz(tz) {
@@ -1306,6 +1307,64 @@ export function createCrmApiRouter(supabase) {
     } catch (err) {
       console.error('[CRM-API] /reports/generate:', err.message);
       return res.status(500).json({ error: 'Erro ao gerar relatório' });
+    }
+  });
+
+  // ======================================================
+  // 12. LEAD SCORING V2 — Score Label + Recálculo manual
+  // ======================================================
+
+  // GET /patients/:patientId/score-label — Retorna label semântico do score atual
+  router.get('/patients/:patientId/score-label', async (req, res) => {
+    try {
+      const { patientId } = req.params;
+      const { data, error } = await supabase
+        .from('patient_crm_projection')
+        .select('lead_score')
+        .eq('patient_id', patientId)
+        .eq('clinic_id', req.clinicId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('[CRM-API] GET /patients/:id/score-label:', error.message);
+        return res.status(500).json({ error: 'Erro ao buscar score' });
+      }
+      if (!data) {
+        return res.status(404).json({ error: 'Paciente não encontrado' });
+      }
+
+      const score = data.lead_score ?? 0;
+      const labelInfo = getScoreLabel(score);
+      return res.json({
+        patient_id: patientId,
+        lead_score: score,
+        ...labelInfo,
+      });
+    } catch (err) {
+      console.error('[CRM-API] GET /patients/:id/score-label:', err.message);
+      return res.status(500).json({ error: 'Erro interno' });
+    }
+  });
+
+  // POST /patients/:patientId/recalculate-score — Força recálculo manual do score
+  router.post('/patients/:patientId/recalculate-score', async (req, res) => {
+    try {
+      const { patientId } = req.params;
+      const result = await calculateLeadScore(supabase, patientId, req.clinicId);
+
+      if (!result.success) {
+        return res.status(422).json({ error: result.error || 'Erro ao calcular score' });
+      }
+
+      const labelInfo = getScoreLabel(result.score);
+      return res.json({
+        success: true,
+        lead_score: result.score,
+        ...labelInfo,
+      });
+    } catch (err) {
+      console.error('[CRM-API] POST /patients/:id/recalculate-score:', err.message);
+      return res.status(500).json({ error: 'Erro interno' });
     }
   });
 
