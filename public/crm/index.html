@@ -472,7 +472,7 @@ function T2(p){
   // BUG-09 fix: separar input bruto (qvRaw) de qv debounced para evitar chamada dupla
   var _qRaw=us(''),qvRaw=_qRaw[0],sQRaw=_qRaw[1];
   var _q=us(''),qv=_q[0],sQ=_q[1];
-  var _f=us('all'),sf=_f[0],sF=_f[1];var _df=us('all'),df=_df[0],sDF=_df[1];
+  var _f=us('all'),sf=_f[0],sF=_f[1];var _df=us('all'),df=_df[0],sDF=_df[1];var _scf=us(0),scF=_scf[0],sScF=_scf[1];
   var isOwner=p.role==='owner';
   // Debounce: aguarda 400ms de inatividade antes de disparar search
   ue(function(){var t=setTimeout(function(){sQ(qvRaw);},400);return function(){clearTimeout(t);};},[qvRaw]);
@@ -492,20 +492,28 @@ function T2(p){
   // mounted ref: evita duplo fetch — useRefresh já chama load no mount
   ue(function(){if(!_mPts.current){_mPts.current=true;return;}load(false);},[qv,sf,df]);
   useRefresh(load,20000,'patients');
+  var displayPts=scF>0?pts.filter(function(pt){var s=pt.lead_score||0;return scF===1?s<15:s>=scF;}):pts;
   return h('div',{className:'fi'},
     h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:12}},
       h('h2',{style:{fontSize:22,fontWeight:700}},'Pacientes ',h('span',{style:{fontSize:14,color:'var(--t3)',fontWeight:400}},'('+tot+')')),
       h('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
         h('input',{type:'text',placeholder:'Buscar...',value:qvRaw,onChange:function(e){sQRaw(e.target.value)},style:{width:160}}),
         h('select',{value:sf,onChange:function(e){sF(e.target.value)}},h('option',{value:'all'},'Todos est\u00e1gios'),stg.map(function(s){return h('option',{key:s.slug,value:s.slug},s.name)})),
-        h('select',{value:df,onChange:function(e){sDF(e.target.value)}},h('option',{value:'all'},'Todos m\u00e9dicos'),docs.map(function(d){return h('option',{key:d.id,value:d.id},d.name)}))
+        h('select',{value:df,onChange:function(e){sDF(e.target.value)}},h('option',{value:'all'},'Todos m\u00e9dicos'),docs.map(function(d){return h('option',{key:d.id,value:d.id},d.name)})),
+        h('select',{value:scF,onChange:function(e){sScF(parseInt(e.target.value)||0)},style:{background:'#0D1117',border:'1px solid #21262D',color:'#C9D1D9',borderRadius:'8px',padding:'6px 10px',fontSize:'13px',cursor:'pointer'}},
+          h('option',{value:0},'Todos os scores'),
+          h('option',{value:70},'\uD83D\uDD25 Quentes (70+)'),
+          h('option',{value:40},'\uD83D\uDFE1 Mornos (40+)'),
+          h('option',{value:15},'\u274C Frios (15+)'),
+          h('option',{value:1},'Inativos (<15)')
+        )
       )
     ),
-    ld?h(Ld):pts.length===0?h(Em,{m:'Nenhum paciente encontrado',i:'\uD83D\uDC65'}):
+    ld?h(Ld):displayPts.length===0?h(Em,{m:'Nenhum paciente encontrado',i:'\uD83D\uDC65'}):
     h('div',{className:'card',style:{padding:0,overflow:'auto'}},
       h('table',null,
         h('thead',null,h('tr',null,h('th',null,'Paciente'),h('th',null,'M\u00e9dico'),h('th',null,'Est\u00e1gio'),h('th',{style:{textAlign:'center'}},'Score'),h('th',{style:{textAlign:'center'}},'Consultas'),h('th',null,'Pr\u00f3ximo Agend.'),h('th',{style:{textAlign:'right'}},'\u00DAlt. Contato'))),
-        h('tbody',null,pts.map(function(pt){
+        h('tbody',null,displayPts.map(function(pt){
           var daysSince=pt.last_contact_at?Math.floor((Date.now()-new Date(pt.last_contact_at).getTime())/86400000):999;
           var isVeryStale=daysSince>60;var isStale=daysSince>30;var isFresh=daysSince<7;
           var hasNS=(pt.total_no_shows||0)>0;
