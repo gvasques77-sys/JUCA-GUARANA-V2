@@ -1690,8 +1690,11 @@ function CampaignsPage(){
   var _schd=us(''),schedDate=_schd[0],sSchedDate=_schd[1];
   var _schtm=us(''),schedTime=_schtm[0],sSchedTime=_schtm[1];
   var _sav=us(false),saving=_sav[0],sSaving=_sav[1];
+  var _mls=us(40),minLS=_mls[0],sMinLS=_mls[1];
+  var _apv=us(null),audPrev=_apv[0],sAudPrev=_apv[1];
+  var _lpv=us(false),loadPrev=_lpv[0],sLoadPrev=_lpv[1];
 
-  function resetForm(){sFStep(1);sFData({name:'',description:'',template_name:'',template_language:'pt_BR'});sAudType('tags');sSelTagIds([]);sSelPatIds([]);sAudPats([]);sPatSrch('');sSchedType('now');sSchedDate('');sSchedTime('')}
+  function resetForm(){sFStep(1);sFData({name:'',description:'',template_name:'',template_language:'pt_BR'});sAudType('tags');sSelTagIds([]);sSelPatIds([]);sAudPats([]);sPatSrch('');sSchedType('now');sSchedDate('');sSchedTime('');sMinLS(40);sAudPrev(null);}
   function goCreate(){resetForm();sView('create')}
   function cancelCreate(){resetForm();sView('list')}
 
@@ -1707,9 +1710,19 @@ function CampaignsPage(){
     else{sSelPatIds(selPatIds.concat([pid]))}
   }
 
+  function fetchAudiencePreview(score){
+    if(score==null)return;
+    sLoadPrev(true);sAudPrev(null);
+    q('/campaigns/audience-preview?min_lead_score='+score+'&audience_type=by_score').then(function(r){
+      sLoadPrev(false);
+      if(r)sAudPrev(r);
+    }).catch(function(){sLoadPrev(false);});
+  }
+
   function saveCampaign(andSend){
     if(!fData.name||!fData.template_name){alert('Preencha nome e template.');return}
-    if(audPats.length===0){alert('Selecione pelo menos 1 destinat\u00e1rio.');return}
+    if(audType!=='by_score'&&audPats.length===0){alert('Selecione pelo menos 1 destinat\u00e1rio.');return}
+    if(audType==='by_score'&&audPrev&&audPrev.total_patients===0){alert('Nenhum paciente encontrado com o score selecionado.');return}
     if(andSend&&schedType==='scheduled'&&(!schedDate||!schedTime)){alert('Preencha data e hora do agendamento.');return}
     sSaving(true);
     var schedAt=schedType==='scheduled'?schedDate+'T'+schedTime+':00':null;
@@ -1720,9 +1733,11 @@ function CampaignsPage(){
       template_language:fData.template_language,
       template_components:[],
       audience_snapshot:{type:audType,tag_ids:selTagIds,patient_ids:selPatIds,patients:audPats.map(function(p){return{id:p.id,name:p.name,phone:p.phone}})},
-      total_recipients:audPats.length,
-      scheduled_at:schedAt
+      total_recipients:audType==='by_score'?(audPrev?audPrev.total_patients:0):audPats.length,
+      scheduled_at:schedAt,
+      audience_type:audType
     };
+    if(audType==='by_score'||audType==='by_score_and_tags'){body.min_lead_score=minLS;}
     q('/campaigns',{method:'POST',body:JSON.stringify(body)}).then(function(r){
       if(!r||r.error){alert('Erro ao salvar: '+(r&&r.error||'tente novamente'));sSaving(false);return}
       var cid=r.id||(r.data&&r.data.id);
@@ -2028,7 +2043,8 @@ function CampaignsPage(){
       fStep===2?h('div',{className:'card',style:{padding:'24px'}},
         h('div',{style:{display:'flex',gap:6,marginBottom:20}},
           h('button',{style:{padding:'8px 16px',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',border:audType==='tags'?'1px solid var(--accent)':'1px solid var(--bdr)',background:audType==='tags'?'rgba(59,130,246,.15)':'transparent',color:audType==='tags'?'var(--accent)':'var(--t3)',fontFamily:'Inter'},onClick:function(){sAudType('tags');sSelPatIds([]);sAudPats([])}},'Por Tags'),
-          h('button',{style:{padding:'8px 16px',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',border:audType==='manual'?'1px solid var(--accent)':'1px solid var(--bdr)',background:audType==='manual'?'rgba(59,130,246,.15)':'transparent',color:audType==='manual'?'var(--accent)':'var(--t3)',fontFamily:'Inter'},onClick:function(){sAudType('manual');sSelTagIds([]);sAudPats([]);sSelPatIds([])}},'Sele\u00e7\u00e3o Manual')
+          h('button',{style:{padding:'8px 16px',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',border:audType==='manual'?'1px solid var(--accent)':'1px solid var(--bdr)',background:audType==='manual'?'rgba(59,130,246,.15)':'transparent',color:audType==='manual'?'var(--accent)':'var(--t3)',fontFamily:'Inter'},onClick:function(){sAudType('manual');sSelTagIds([]);sAudPats([]);sSelPatIds([])}},'Sele\u00e7\u00e3o Manual'),
+          h('button',{style:{padding:'8px 16px',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',border:audType==='by_score'?'1px solid #E74C3C':'1px solid var(--bdr)',background:audType==='by_score'?'rgba(231,76,60,.15)':'transparent',color:audType==='by_score'?'#E74C3C':'var(--t3)',fontFamily:'Inter'},onClick:function(){sAudType('by_score');sSelTagIds([]);sAudPats([]);sSelPatIds([]);fetchAudiencePreview(minLS);}},'Por Lead Score \uD83D\uDD25')
         ),
 
         // Tags mode
@@ -2073,9 +2089,25 @@ function CampaignsPage(){
           h('div',{style:{marginTop:12,padding:'12px 16px',background:'rgba(59,130,246,.05)',borderRadius:10,border:'1px solid var(--bdr)',fontSize:13,color:'var(--t2)'}},selPatIds.length+' paciente'+(selPatIds.length!==1?'s':'')+' selecionado'+(selPatIds.length!==1?'s':''))
         ):null,
 
+        // by_score mode
+        audType==='by_score'?h('div',{style:{marginTop:4}},
+          h('div',{style:{marginBottom:8,color:'var(--t3)',fontSize:12}},'Score m\u00ednimo dos pacientes'),
+          h('select',{value:minLS,onChange:function(e){var v=parseInt(e.target.value);sMinLS(v);fetchAudiencePreview(v);},style:{width:'100%',background:'#161B22',border:'1px solid #30363D',color:'#C9D1D9',borderRadius:'8px',padding:'10px',fontSize:'14px',marginBottom:10}},
+            h('option',{value:70},'\uD83D\uDD25 Quentes \u2014 score 70 ou mais'),
+            h('option',{value:40},'\uD83D\uDFE1 Mornos \u2014 score 40 ou mais'),
+            h('option',{value:15},'\u2744\uFE0F Frios \u2014 score 15 ou mais'),
+            h('option',{value:1},'Todos com algum score (1+)')
+          ),
+          loadPrev?h('p',{style:{color:'var(--t3)',fontSize:12,margin:0}},'Calculando audi\u00eancia...'):null,
+          audPrev&&!loadPrev?h('div',{style:{padding:'10px 14px',background:'rgba(231,76,60,.08)',borderRadius:'8px',border:'1px solid rgba(231,76,60,.25)'}},
+            h('p',{style:{color:'#C9D1D9',fontSize:13,margin:0}},'\uD83D\uDC65 ',h('strong',null,audPrev.total_patients),' paciente'+(audPrev.total_patients!==1?'s':'')+' ser\u00e3o alcan\u00e7ados'),
+            audPrev.sample_names&&audPrev.sample_names.length>0?h('p',{style:{color:'var(--t3)',fontSize:11,margin:'4px 0 0'}},'Ex: '+audPrev.sample_names.join(', ')+'...'):null
+          ):null
+        ):null,
+
         h('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20}},
           h('button',{onClick:function(){sFStep(1)},style:{padding:'8px 18px',borderRadius:8,border:'1px solid var(--bdr)',background:'none',color:'var(--t2)',cursor:'pointer',fontFamily:'Inter',fontSize:13}},'\u2190 Anterior'),
-          h('button',{className:'btn',onClick:function(){if(audPats.length===0){alert('Selecione pelo menos 1 destinat\u00e1rio.');return}sFStep(3)}},'Pr\u00f3ximo \u2192')
+          h('button',{className:'btn',onClick:function(){if(audType!=='by_score'&&audPats.length===0){alert('Selecione pelo menos 1 destinat\u00e1rio.');return}sFStep(3)}},'Pr\u00f3ximo \u2192')
         )
       ):null,
 
