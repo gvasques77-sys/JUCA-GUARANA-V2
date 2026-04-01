@@ -545,6 +545,14 @@ function T2(p){
   );
 }
 
+/* ===== HELPER: SCORE LABEL SEMÂNTICO (Lead Scoring V2) ===== */
+function getScoreLabel(score){
+  if(score>=70)return{label:'QUENTE',emoji:'\uD83D\uDD25',color:'#E74C3C',bg:'rgba(231,76,60,0.15)'};
+  if(score>=40)return{label:'MORNO',emoji:'\uD83D\uDFE1',color:'#F39C12',bg:'rgba(243,156,18,0.15)'};
+  if(score>=15)return{label:'FRIO',emoji:'\u2744\uFE0F',color:'#3498DB',bg:'rgba(52,152,219,0.15)'};
+  return{label:'INATIVO',emoji:'\uD83D\uDC80',color:'#7F8C8D',bg:'rgba(127,140,141,0.15)'};
+}
+
 /* ===== MODAL: FICHA COMPLETA DO PACIENTE (F5) ===== */
 function PatientModal(p){
   var _d=us(null),data=_d[0],sD=_d[1];
@@ -557,6 +565,7 @@ function PatientModal(p){
   var _ptags=us([]),ptags=_ptags[0],sPtags=_ptags[1];
   var _ctags=us([]),ctags=_ctags[0],sCtags=_ctags[1];
   var _showTagPicker=us(false),showTagPicker=_showTagPicker[0],sShowTagPicker=_showTagPicker[1];
+  var _rc=us(false),recalc=_rc[0],sRecalc=_rc[1];
   var isOwner=p.role==='owner';
 
   function load(){
@@ -583,6 +592,14 @@ function PatientModal(p){
       if(r&&r.success)loadTags();
       else if(r&&r.error)alert('Erro ao remover tag: '+r.error);
     }).catch(function(){alert('Erro de conexão ao remover tag.');});
+  }
+  function handleRecalc(){
+    sRecalc(true);
+    q('/patients/'+p.pid+'/recalculate-score',{method:'POST'}).then(function(r){
+      sRecalc(false);
+      if(r&&r.success){load();alert('Score atualizado: '+r.lead_score+' ('+r.label+')');}
+      else{alert('Erro ao recalcular score');}
+    }).catch(function(){sRecalc(false);alert('Erro ao recalcular score');});
   }
 
   function saveProfile(){
@@ -645,7 +662,11 @@ function PatientModal(p){
         h('div',{className:'card',style:{marginBottom:12}},
           h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
             h('div',{style:{fontSize:14,fontWeight:600}},'Lead Score'),
-            h('div',{className:'mono',style:{fontSize:22,fontWeight:700,color:(proj.lead_score||0)>=60?'var(--green)':(proj.lead_score||0)>=30?'var(--amber)':'var(--t3)'}},proj.lead_score!==undefined?(proj.lead_score||0)+'/100':'\u2014')
+            h('div',{style:{display:'flex',alignItems:'center',gap:6}},
+              h('div',{className:'mono',style:{fontSize:22,fontWeight:700,color:(proj.lead_score||0)>=60?'var(--green)':(proj.lead_score||0)>=30?'var(--amber)':'var(--t3)'}},proj.lead_score!==undefined?(proj.lead_score||0)+'/100':'\u2014'),
+              (function(){var si=getScoreLabel(proj.lead_score||0);return h('span',{style:{display:'inline-flex',alignItems:'center',gap:'4px',padding:'3px 10px',borderRadius:'20px',fontSize:'11px',fontWeight:700,letterSpacing:'0.5px',color:si.color,background:si.bg,border:'1px solid '+si.color+'40'}},si.emoji+' '+si.label)})(),
+              h('button',{onClick:handleRecalc,disabled:recalc,title:'Recalcular score agora',style:{background:'transparent',border:'1px solid #333',color:'#888',borderRadius:'6px',padding:'2px 8px',fontSize:'11px',cursor:'pointer'}},recalc?'\u23F3':'\u21BB')
+            )
           ),
           h('div',{style:{height:8,background:'var(--bg)',borderRadius:4,overflow:'hidden'}},
             h('div',{style:{width:Math.min(proj.lead_score||0,100)+'%',height:'100%',borderRadius:4,background:(proj.lead_score||0)>=60?'var(--green)':(proj.lead_score||0)>=30?'var(--amber)':'var(--t3)',transition:'width 0.6s ease'}})
