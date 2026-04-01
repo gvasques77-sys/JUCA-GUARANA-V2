@@ -13,7 +13,7 @@ import googleCalendarRoutes from './routes/googleCalendarRoutes.js';
 import { schedulingToolsDefinitions, executeSchedulingTool } from './tools/schedulingTools.js';
 import { redisHealthCheck } from './services/redisService.js';
 import { getOrCreateConversation, updateConversationTurn, finalizeConversation } from './services/conversationTracker.js';
-import { processPostConversation } from './services/crmService.js';
+import { processPostConversation, startScoreDecayJob } from './services/crmService.js';
 import { startTaskProcessor } from './services/taskProcessor.js';
 import { createCrmApiRouter } from './routes/crmDashboardRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
@@ -5527,5 +5527,12 @@ app.listen(PORT, "0.0.0.0", () => {
     startCampaignScheduler();
   } catch (err) {
     log.warn({ err: err.message }, '[CampaignScheduler] Falha ao iniciar — server continua sem scheduler');
+  }
+
+  // — Lead Scoring V2: Score Decay Job (decaimento temporal a cada 24h) —
+  try {
+    startScoreDecayJob();
+  } catch (err) {
+    log.warn({ err: err.message }, '[DECAY] Falha ao iniciar score decay job — server continua sem decay');
   }
 });

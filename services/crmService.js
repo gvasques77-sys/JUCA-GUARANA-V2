@@ -1,14 +1,25 @@
 /**
  * CRM V2 Service — Módulo Event-Centric para CLINICORE
- * 
+ *
  * Arquitetura: Eventos imutáveis → Projeções derivadas → Tarefas
- * 
+ *
  * REGRAS ABSOLUTAS:
  * - NUNCA faz throw — se falhar, retorna { success: false }
  * - Toda inserção usa ON CONFLICT DO NOTHING (idempotência)
  * - Prefixo [CRM] em todos os logs
  * - Recebe supabase client como parâmetro (não cria instância própria)
+ *
+ * EXCEÇÃO: startScoreDecayJob usa cliente próprio com service_role_key
+ * pois roda como scheduler periódico sem contexto de request.
  */
+
+import { createClient } from '@supabase/supabase-js';
+
+// Cliente dedicado para o decay job (service_role_key — bypass RLS)
+const _sbDecay = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // ======================================================
 // CATÁLOGO DE EVENTOS (referência — usado para validação)
@@ -249,7 +260,8 @@ async function scheduleTask(supabase, clinicId, patientId, taskType, dueAt, opti
 
 /**
  * Calcula e atualiza o lead_score do paciente na projeção CRM.
- * Baseado em engajamento, comparecimento e recência.
+ * Lógica granular por blocos: Agendamentos, Recência, Confiabilidade,
+ * Engajamento e Penalidades.
  *
  * @param {object} supabase - Cliente Supabase
  * @param {string} patientId - UUID do paciente
@@ -258,9 +270,7 @@ async function scheduleTask(supabase, clinicId, patientId, taskType, dueAt, opti
  */
 async function calculateLeadScore(supabase, patientId, clinicId) {
   try {
-    let score = 0;
-
-    // Buscar dados agregados dos eventos do paciente
+    // Única query trazendo event_type e occurred_at
     const { data: events, error: eventsErr } = await supabase
       .from('crm_events')
       .select('event_type, occurred_at')
@@ -272,41 +282,53 @@ async function calculateLeadScore(supabase, patientId, clinicId) {
       return { success: false, error: eventsErr.message };
     }
 
-    const eventTypes = (events || []).map(e => e.event_type);
-    const eventDates = (events || []).map(e => new Date(e.occurred_at));
-
-    // +30 — Tem agendamento confirmado
-    if (eventTypes.includes('booking_created') || eventTypes.includes('booking_confirmed')) {
-      score += 30;
-    }
-
-    // +20 por consulta comparecida (máx +40)
-    const attendedCount = eventTypes.filter(t => t === 'appointment_completed').length;
-    score += Math.min(attendedCount * 20, 40);
-
-    // +15 — Último contato nas últimas 48h
+    const eventList = events || [];
+    const eventTypes = eventList.map(e => e.event_type);
+    const eventDates = eventList.map(e => new Date(e.occurred_at));
     const now = new Date();
-    const recentThreshold = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-    const hasRecentContact = eventDates.some(d => d > recentThreshold);
-    if (hasRecentContact) {
-      score += 15;
+    let score = 0;
+
+    // ── BLOCO A: Agendamentos (max 35 pontos) ──────────────────────────
+    const hasBooking = eventTypes.includes('booking_created') || eventTypes.includes('booking_confirmed');
+    const attendedCount = eventTypes.filter(t => t === 'appointment_completed').length;
+
+    let blockA = 0;
+    if (hasBooking) blockA += 25;
+    if (attendedCount >= 3) blockA += 35;
+    else if (attendedCount === 2) blockA += 20;
+    else if (attendedCount === 1) blockA += 10;
+    score += Math.min(35, blockA);
+
+    // ── BLOCO B: Recência (max 20 pontos) ──────────────────────────────
+    if (eventDates.length > 0) {
+      const lastEventDate = new Date(Math.max(...eventDates.map(d => d.getTime())));
+      const hoursAgo = (now - lastEventDate) / (1000 * 60 * 60);
+
+      if (hoursAgo < 48) score += 20;
+      else if (hoursAgo < 7 * 24) score += 12;
+      else if (hoursAgo < 14 * 24) score += 6;
+      else if (hoursAgo < 30 * 24) score += 2;
+      // > 30 dias → +0
     }
 
-    // +15 — Nunca deu no-show
-    const hasNoShow = eventTypes.includes('no_show');
-    if (!hasNoShow) {
-      score += 15;
-    }
+    // ── BLOCO C: Confiabilidade / No-show (max 15 pontos) ──────────────
+    const noShowCount = eventTypes.filter(t => t === 'no_show').length;
+    if (noShowCount === 0) score += 15;
+    else if (noShowCount === 1) score += 5;
+    // 2+ no-shows → +0
 
-    // +10 — Total de conversas > 3 (engajamento alto)
-    const conversationEvents = eventTypes.filter(t =>
+    // ── BLOCO D: Engajamento / Conversas (max 15 pontos) ───────────────
+    const engagementCount = eventTypes.filter(t =>
       ['first_contact', 'conversation_ended', 'info_requested', 'booking_requested'].includes(t)
-    );
-    if (conversationEvents.length > 3) {
-      score += 10;
-    }
+    ).length;
+    if (engagementCount >= 6) score += 15;
+    else if (engagementCount >= 3) score += 10;
+    else if (engagementCount >= 1) score += 5;
 
-    // Limitar score a 0-100
+    // ── BLOCO E: Penalidades ───────────────────────────────────────────
+    if (eventTypes.includes('booking_canceled')) score -= 10;
+
+    // ── FINAL ──────────────────────────────────────────────────────────
     score = Math.max(0, Math.min(100, score));
 
     // Atualizar na projeção
@@ -327,6 +349,103 @@ async function calculateLeadScore(supabase, patientId, clinicId) {
     console.error(`[CRM] Erro em calculateLeadScore:`, error.message);
     return { success: false, error: error.message };
   }
+}
+
+// ======================================================
+// 3b. getScoreLabel — Label semântico baseado no score
+// ======================================================
+
+/**
+ * Retorna label semântico, emoji e cor para um dado lead_score.
+ *
+ * @param {number} score - Valor do lead_score (0-100)
+ * @returns {{ label: string, emoji: string, color: string }}
+ */
+function getScoreLabel(score) {
+  if (score >= 70) return { label: 'QUENTE',  emoji: '🔥', color: '#E74C3C' };
+  if (score >= 40) return { label: 'MORNO',   emoji: '🟡', color: '#F39C12' };
+  if (score >= 15) return { label: 'FRIO',    emoji: '❄️',  color: '#3498DB' };
+  return           { label: 'INATIVO', emoji: '💀', color: '#7F8C8D' };
+}
+
+// ======================================================
+// 3c. startScoreDecayJob — Decaimento temporal de scores
+// ======================================================
+
+/**
+ * Inicia o job periódico de decaimento de lead_score.
+ * Roda a cada 24 horas. Usa cliente próprio com service_role_key.
+ * NÃO atualiza updated_at — preserva a data real do último evento.
+ */
+function startScoreDecayJob() {
+  console.log('[DECAY] Score decay job iniciado (intervalo: 24h)');
+
+  setInterval(async () => {
+    try {
+      console.log('[DECAY] Iniciando score decay...');
+      const now = new Date();
+      let totalUpdated = 0;
+      let offset = 0;
+      const batchSize = 100;
+
+      while (true) {
+        const { data: records, error } = await _sbDecay
+          .from('patient_crm_projection')
+          .select('patient_id, clinic_id, lead_score, updated_at')
+          .gt('lead_score', 0)
+          .range(offset, offset + batchSize - 1);
+
+        if (error) {
+          console.error('[DECAY] Erro ao buscar registros:', error.message);
+          break;
+        }
+
+        if (!records || records.length === 0) break;
+
+        const toUpdate = records
+          .map(record => {
+            const daysAgo = (now - new Date(record.updated_at)) / (1000 * 60 * 60 * 24);
+            let decrement = 0;
+            if (daysAgo > 60)      decrement = 30;
+            else if (daysAgo >= 31) decrement = 20;
+            else if (daysAgo >= 15) decrement = 10;
+            else if (daysAgo >= 7)  decrement = 5;
+            // < 7 dias → skip
+            return { ...record, decrement };
+          })
+          .filter(r => r.decrement > 0);
+
+        if (toUpdate.length > 0) {
+          const results = await Promise.allSettled(
+            toUpdate.map(r => {
+              const newScore = Math.max(0, r.lead_score - r.decrement);
+              return _sbDecay
+                .from('patient_crm_projection')
+                .update({ lead_score: newScore })
+                // NÃO atualiza updated_at — preservar data real do último evento
+                .eq('patient_id', r.patient_id)
+                .eq('clinic_id', r.clinic_id);
+            })
+          );
+
+          results.forEach((result, i) => {
+            if (result.status === 'rejected') {
+              console.error('[DECAY] Erro ao atualizar paciente:', toUpdate[i].patient_id, result.reason);
+            }
+          });
+
+          totalUpdated += results.filter(r => r.status === 'fulfilled').length;
+        }
+
+        offset += batchSize;
+        if (records.length < batchSize) break;
+      }
+
+      console.log(`[DECAY] Score decay aplicado em ${totalUpdated} pacientes`);
+    } catch (err) {
+      console.error('[DECAY] Erro no score decay job:', err.message);
+    }
+  }, 86400000); // 24 horas
 }
 
 // ======================================================
@@ -532,6 +651,8 @@ export {
   emitEvent,
   scheduleTask,
   calculateLeadScore,
+  getScoreLabel,
+  startScoreDecayJob,
   processPostConversation,
   VALID_EVENT_TYPES,
   VALID_TASK_TYPES,
