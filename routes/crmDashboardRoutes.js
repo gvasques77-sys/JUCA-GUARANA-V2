@@ -1346,6 +1346,108 @@ export function createCrmApiRouter(supabase) {
     }
   });
 
+  // ======================================================
+  // POST /waitlist — Adicionar paciente na lista de espera
+  // Body: { patient_name, patient_phone, doctor_id?, specialty?,
+  //         preferred_dates?[], preferred_period?, notes? }
+  // ======================================================
+  router.post('/waitlist', async (req, res) => {
+    try {
+      const { patient_name, patient_phone, doctor_id, specialty, preferred_dates, preferred_period, notes } = req.body || {};
+
+      if (!patient_name || !patient_phone) {
+        return res.status(400).json({ error: 'patient_name e patient_phone são obrigatórios' });
+      }
+
+      // Buscar patient_id se o paciente já estiver cadastrado
+      const { data: existingPatient } = await supabase
+        .from('patients')
+        .select('id')
+        .eq('phone', patient_phone)
+        .eq('clinic_id', req.clinicId)
+        .maybeSingle();
+
+      const { data: entry, error: insertErr } = await supabase
+        .from('clinic_waitlist')
+        .insert({
+          clinic_id:        req.clinicId,
+          patient_id:       existingPatient?.id || null,
+          patient_name:     patient_name.trim(),
+          patient_phone:    patient_phone.trim(),
+          doctor_id:        doctor_id || null,
+          specialty:        specialty || null,
+          preferred_dates:  Array.isArray(preferred_dates) ? preferred_dates : [],
+          preferred_period: preferred_period || 'qualquer',
+          notes:            notes || null,
+          status:           'waiting',
+        })
+        .select('id')
+        .single();
+
+      if (insertErr) {
+        console.error('[CRM-API] POST /waitlist:', insertErr.message);
+        return res.status(500).json({ error: 'Erro ao inserir na lista de espera' });
+      }
+
+      return res.status(201).json({ success: true, waitlist_id: entry.id });
+    } catch (err) {
+      console.error('[CRM-API] POST /waitlist:', err.message);
+      return res.status(500).json({ error: 'Erro interno' });
+    }
+  });
+
+  // GET /waitlist — Listar entradas de espera da clínica (status=waiting por padrão)
+  router.get('/waitlist', async (req, res) => {
+    try {
+      const { status = 'waiting', limit = '50' } = req.query;
+      const { data, error } = await supabase
+        .from('clinic_waitlist')
+        .select('id, patient_name, patient_phone, specialty, preferred_period, preferred_dates, notes, status, created_at, doctors(name)')
+        .eq('clinic_id', req.clinicId)
+        .eq('status', status)
+        .order('created_at', { ascending: true })
+        .limit(Math.min(Number(limit) || 50, 200));
+
+      if (error) {
+        console.error('[CRM-API] GET /waitlist:', error.message);
+        return res.status(500).json({ error: 'Erro ao buscar lista de espera' });
+      }
+
+      return res.json({ waitlist: data || [] });
+    } catch (err) {
+      console.error('[CRM-API] GET /waitlist:', err.message);
+      return res.status(500).json({ error: 'Erro interno' });
+    }
+  });
+
+  // PATCH /waitlist/:id/status — Atualizar status de um entry da lista de espera
+  router.patch('/waitlist/:id/status', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body || {};
+      const validStatuses = ['waiting', 'contacted', 'scheduled', 'cancelled'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: `status deve ser um de: ${validStatuses.join(', ')}` });
+      }
+
+      const { error } = await supabase
+        .from('clinic_waitlist')
+        .update({ status })
+        .eq('id', id)
+        .eq('clinic_id', req.clinicId);
+
+      if (error) {
+        console.error('[CRM-API] PATCH /waitlist/:id/status:', error.message);
+        return res.status(500).json({ error: 'Erro ao atualizar status' });
+      }
+
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('[CRM-API] PATCH /waitlist/:id/status:', err.message);
+      return res.status(500).json({ error: 'Erro interno' });
+    }
+  });
+
   // POST /patients/:patientId/recalculate-score — Força recálculo manual do score
   router.post('/patients/:patientId/recalculate-score', async (req, res) => {
     try {

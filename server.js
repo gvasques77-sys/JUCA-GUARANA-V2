@@ -1869,11 +1869,32 @@ Você é a Lara, secretária virtual da clínica. Você é inteligente, acolhedo
 Você entende QUALQUER mensagem do paciente — seja agendamento, dúvida, sintoma, reclamação ou conversa.
 
 ## TOM DE VOZ
-- Fale como uma pessoa real, não como robô
-- Respostas curtas e diretas (máximo 3 frases quando possível)
-- Use no máximo 1-2 emojis por mensagem 😊
-- NUNCA repita a mesma pergunta duas vezes
-- NUNCA faça duas perguntas na mesma mensagem
+- Calorosa, humana e acolhedora — como uma recepcionista que genuinamente se importa
+- Natural, como conversa de pessoa real (nunca robótica)
+- Breve e clara — sem enrolação, mas sem frieza
+- Máximo 1-2 emojis por mensagem (😊 🗓️ ✅ 💙)
+- NUNCA diga: "Se precisar de mais informações, é só avisar!"
+- NUNCA repita perguntas já respondidas pelo paciente
+- NUNCA faça múltiplas perguntas numa mesma mensagem
+- SEMPRE reconheça o que o paciente disse antes de pedir o próximo dado
+
+## SITUAÇÕES ESPECIAIS — EMPATIA CONTEXTUAL
+
+Quando paciente menciona dor, urgência ou desconforto do filho/familiar:
+→ Antes de pedir qualquer dado: "Entendo, imagino como deve estar preocupado(a). Vou te ajudar a marcar o quanto antes! 💙"
+
+Quando paciente agenda para filho ou familiar:
+→ "Que cuidado lindo! Vamos marcar com carinho."
+
+Quando não há horários disponíveis:
+→ "Que pena, não temos vaga nessa data 😕 Mas olha, tenho outras opções bem próximas..."
+
+Quando agendamento é confirmado:
+→ "Tudo certo! ✅ Consulta confirmada. Qualquer dúvida ou precisar remarcar, é só me chamar. Cuide-se! 💙"
+
+Quando paciente agradece:
+→ "Fico feliz em ajudar! Qualquer coisa, estou por aqui 😊"
+→ NÃO usar: "De nada! Se precisar de mais informações, é só avisar!"
 
 ## DATA E HORA ATUAL
 Hoje é: **${CURRENT_DATE}** (${CURRENT_WEEKDAY})
@@ -1930,6 +1951,15 @@ Exemplos: "quanto custa e vocês aceitam unimed? quero marcar consulta"
 → Só depois pergunte sobre o agendamento
 → NUNCA pule a resposta da dúvida para ir direto ao agendamento
 
+### 3C. MENSAGEM MISTA DURANTE AGENDAMENTO (resposta ao fluxo + pergunta adicional)
+Exemplos: "14h, vocês aceitam Unimed?", "pode ser terça, qual é o endereço?"
+→ OBRIGATÓRIO: processe PRIMEIRO a etapa do fluxo atual (registrar horário/data escolhida)
+→ Responda a pergunta adicional em seguida, na mesma mensagem
+→ Retome o fluxo de agendamento ao final
+→ NUNCA abandone o fluxo porque o paciente fez uma pergunta adicional
+Exemplo correto para "14h, vocês aceitam Unimed?":
+"Ótimo, anotei o horário das 14h! ✅ Sobre o Unimed — [resposta sobre convênio]. [próximo passo do agendamento]"
+
 ### 4. QUER AGENDAR (explícito ou implícito)
 Exemplos: "quero marcar", "preciso de uma consulta", "tem horário?"
 → Siga o fluxo de agendamento abaixo.
@@ -1954,6 +1984,7 @@ Colete os dados nesta ordem (pule o que já tem ✅):
    Qual você prefere?"
    → Se paciente escolher data específica: chame 'verificar_disponibilidade'.
    → Se não tiver horário nessa data: chame 'buscar_proximas_datas' e mostre alternativas. NÃO repita "não encontrei" — mostre as próximas opções disponíveis.
+   → Se NÃO houver nenhuma data disponível nos próximos dias: ofereça a lista de espera (ver seção LISTA DE ESPERA abaixo).
 
 **3. NOME** — Peça o nome completo do paciente (se ainda não tem).
 
@@ -1993,6 +2024,30 @@ Ao agendar uma consulta, siga RIGOROSAMENTE esta sequência:
 1. **ESPECIALIDADE/MÉDICO** — Pergunte qual especialidade ou médico o paciente deseja.
    Quando o paciente responder, resolva o médico e IMEDIATAMENTE chame a tool 'buscar_proximas_datas'
    com o doctor_id para obter os próximos horários disponíveis. NÃO pergunte a data antes de chamar a tool.
+
+---
+
+## LISTA DE ESPERA / ENCAIXE
+
+Quando não houver horários disponíveis para a data solicitada:
+1. Informe com empatia: "Que pena, não temos vaga nessa data 😕"
+2. Ofereça AUTOMATICAMENTE as próximas datas disponíveis (chame 'buscar_proximas_datas')
+3. Se o paciente não quiser nenhuma alternativa, ofereça a lista de espera:
+   "Posso te colocar na nossa lista de espera! Assim, se surgir um cancelamento de última hora, entro em contato com você antes de qualquer um. Quer que eu te coloque na lista? 😊"
+4. Se o paciente aceitar, coletar: período de preferência (manhã, tarde ou qualquer horário) e urgência se mencionada
+5. Confirmar: "Prontinho! Você está na nossa lista de espera com o Dr. [nome]. Assim que surgir uma vaga, te aviso aqui no WhatsApp! 💙"
+
+---
+
+## REGRA OBRIGATÓRIA — EXIBIÇÃO DE DISPONIBILIDADE
+
+NUNCA pergunte "qual data prefere?" ou "qual horário prefere?" sem antes:
+1. Chamar a tool 'buscar_proximas_datas' para o médico/especialidade selecionada
+2. Exibir as datas e horários disponíveis ao paciente
+3. SÓ ENTÃO perguntar qual prefere
+
+Este fluxo é OBRIGATÓRIO tanto quando o paciente usa os botões quanto quando escreve livremente.
+O paciente não sabe quais dias o médico atende — é sua responsabilidade informar isso primeiro.
 
 `.trim();
 };
@@ -3985,8 +4040,8 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         // Retornar mensagem de contexto mantendo o estado
         const specialtyDisplay = conversationState.specialty || conversationState.doctor_name;
         const contextMsg = specialtyDisplay
-          ? `Ainda estou buscando horários para ${specialtyDisplay}. Um momento por favor... Se quiser continuar o agendamento, é só me dizer a data de preferência.`
-          : `Ainda estou aqui para te ajudar! Você quer marcar, remarcar, cancelar ou tirar uma dúvida?`;
+          ? `Estou com uma dificuldade para carregar os horários agora 😅 Me diz se prefere manhã ou tarde que eu verifico pra você!`
+          : `Estou aqui para te ajudar! 😊 Você quer marcar uma consulta, tirar alguma dúvida ou precisa de outra coisa?`;
 
         // CORREÇÃO 2: Salvar histórico antes de retornar
         await saveConversationTurn({
@@ -4171,7 +4226,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         console.log('[CONFIRM] 🔍 PAYLOAD VALIDAÇÃO:', JSON.stringify(_confirmPayload));
         if (!updatedState.doctor_id || !_dateValid || !updatedState.preferred_time) {
           console.error('[CONFIRM] ❌ Payload inválido:', { doctor_id: updatedState.doctor_id, data: _dateToBook, horario: updatedState.preferred_time });
-          const invalidMsg = 'Não foi possível confirmar: alguns dados do agendamento estão incompletos. Vamos recomeçar? Por favor, informe novamente a data e horário desejados.';
+          const invalidMsg = 'Ops, tive uma dificuldade técnica aqui! 😅 Não se preocupe — me conta novamente qual data e horário você prefere que eu cuido de tudo!';
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
             booking_state: BOOKING_STATES.COLLECTING_DATE,
             preferred_date: null, preferred_date_iso: null, preferred_time: null,
@@ -4187,9 +4242,9 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             { clinicId: envelope.clinic_id, userPhone: envelope.from }
           );
           console.log('[CONFIRM] criar_agendamento result:', JSON.stringify(agendResult));
-          const displayDate1 = updatedState.preferred_date_iso
+          const displayDate1 = formatDateBR(updatedState.preferred_date_iso
             || updatedState.preferred_date
-            || 'Data a confirmar';
+            || '')  || 'Data a confirmar';
           const successMsg = agendResult?.success
             ? `✅ Agendamento confirmado!\n\n👤 Paciente: ${updatedState.patient_name}\n👨‍⚕️ Médico: ${updatedState.doctor_name}\n📅 Data: ${displayDate1}\n🕐 Horário: ${updatedState.preferred_time}\n\nAté lá! Se precisar de algo, é só chamar. 😊`
             : `Não foi possível concluir o agendamento: ${agendResult?.message || 'erro desconhecido'}. Tente novamente ou fale com um atendente.`;
@@ -4312,7 +4367,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         console.log('[CONFIRM-TEXT] 🔍 PAYLOAD VALIDAÇÃO:', JSON.stringify(_confirmPayloadText));
         if (!updatedState.doctor_id || !_dateValidText || !updatedState.preferred_time) {
           console.error('[CONFIRM-TEXT] ❌ Payload inválido:', { doctor_id: updatedState.doctor_id, data: _dateToBookText, horario: updatedState.preferred_time });
-          const invalidMsg2 = 'Não foi possível confirmar: alguns dados estão incompletos. Vamos recomeçar? Informe novamente a data e horário desejados.';
+          const invalidMsg2 = 'Ops, tive uma dificuldade técnica aqui! 😅 Não se preocupe — me conta novamente qual data e horário você prefere que eu cuido de tudo!';
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
             booking_state: BOOKING_STATES.COLLECTING_DATE,
             preferred_date: null, preferred_date_iso: null, preferred_time: null,
@@ -4328,9 +4383,9 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             { clinicId: envelope.clinic_id, userPhone: envelope.from }
           );
           console.log('[CONFIRM-TEXT] criar_agendamento result:', JSON.stringify(agendResult));
-          const displayDate2 = updatedState.preferred_date_iso
+          const displayDate2 = formatDateBR(updatedState.preferred_date_iso
             || updatedState.preferred_date
-            || 'Data a confirmar';
+            || '') || 'Data a confirmar';
           const successMsg = agendResult?.success
             ? `✅ Agendamento confirmado!\n\n👤 Paciente: ${updatedState.patient_name}\n👨‍⚕️ Médico: ${updatedState.doctor_name}\n📅 Data: ${displayDate2}\n🕐 Horário: ${updatedState.preferred_time}\n\nAté lá! Se precisar de algo, é só chamar. 😊`
             : `Não foi possível concluir o agendamento: ${agendResult?.message || 'erro desconhecido'}. Tente novamente ou fale com um atendente.`;
