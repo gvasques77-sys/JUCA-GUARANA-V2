@@ -689,14 +689,14 @@ export function createCrmApiRouter(supabase) {
       const [{ data: todayRaw }, { data: upcomingRaw }] = await Promise.all([
         supabase
           .from('appointments')
-          .select('id, appointment_date, start_time, status, patients(name, phone), doctors(name, specialty), doctor_services(name)')
+          .select('id, appointment_date, start_time, status, noshowrisk_score, noshowrisk_label, patients(name, phone), doctors(name, specialty), services(name)')
           .eq('clinic_id', req.clinicId)
           .eq('appointment_date', todayStr)
           .order('start_time', { ascending: true })
           .limit(60),
         supabase
           .from('appointments')
-          .select('id, appointment_date, start_time, status, patients(name, phone), doctors(name, specialty), doctor_services(name)')
+          .select('id, appointment_date, start_time, status, noshowrisk_score, noshowrisk_label, patients(name, phone), doctors(name, specialty), services(name)')
           .eq('clinic_id', req.clinicId)
           .gt('appointment_date', todayStr)
           .lte('appointment_date', nextTwoWeeks)
@@ -706,17 +706,24 @@ export function createCrmApiRouter(supabase) {
           .limit(40),
       ]);
 
-      const normalize = (a) => ({
-        id: a.id,
-        appointment_date: a.appointment_date,
-        start_time: a.start_time,
-        status: a.status,
-        patient_name: a.patients?.name || '—',
-        patient_phone: a.patients?.phone || '',
-        doctor_name: a.doctors?.name || '—',
-        doctor_specialty: a.doctors?.specialty || '',
-        service_name: a.doctor_services?.name || '—',
-      });
+      const normalize = (a) => {
+        const [y, m, d] = (a.appointment_date || '').split('-');
+        const dateFormatted = y ? `${d}/${m}/${y}` : a.appointment_date;
+        return {
+          id: a.id,
+          appointment_date: a.appointment_date,
+          appointment_date_formatted: dateFormatted,
+          start_time: a.start_time?.substring(0, 5) || '',
+          status: a.status,
+          patient_name: a.patients?.name || '—',
+          patient_phone: a.patients?.phone || '',
+          doctor_name: a.doctors?.name || '—',
+          doctor_specialty: a.doctors?.specialty || '',
+          service_name: a.services?.name || '—',
+          noshowrisk_score: a.noshowrisk_score ?? null,
+          noshowrisk_label: a.noshowrisk_label ?? null,
+        };
+      };
 
       return res.json({
         today: (todayRaw || []).map(normalize),
