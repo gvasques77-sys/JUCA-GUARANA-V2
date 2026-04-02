@@ -27,6 +27,8 @@ import adminBillingRoutes from './routes/adminBillingRoutes.js';
 import adminAlertRoutes from './routes/adminAlertRoutes.js';
 import adminOnboardingRoutes from './routes/adminOnboardingRoutes.js';
 import { trackAiUsage } from './services/usageTracker.js';
+import { getClinicWhatsAppConfig } from './services/whatsappConfigHelper.js';
+import { markAsReadAndSimulateTyping } from './services/whatsappTyping.js';
 
 
 
@@ -2137,6 +2139,22 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
       }
     } catch (lockEx) {
       log.warn({ err: String(lockEx) }, '[LOCK] Exceção no lock — continuando sem proteção');
+    }
+
+    // ======================================================
+    // TYPING INDICATOR — simula digitação antes de processar
+    // Marca mensagem como lida (✓✓ azul) e aguarda delay para
+    // exibir os "..." no WhatsApp do paciente.
+    // Falhas aqui nunca interrompem o fluxo principal.
+    // ======================================================
+    try {
+      const waConfig = await getClinicWhatsAppConfig(envelope.clinic_id);
+      if (waConfig && envelope.correlation_id) {
+        const phoneNumberId = envelope.phone_number_id || waConfig.phone_number_id;
+        await markAsReadAndSimulateTyping(phoneNumberId, envelope.correlation_id, waConfig.access_token, 2000);
+      }
+    } catch (_typingErr) {
+      console.warn('[TypingIndicator] Erro ao iniciar typing indicator:', _typingErr?.message);
     }
 
     // ======================================================
