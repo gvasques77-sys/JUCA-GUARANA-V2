@@ -2087,6 +2087,106 @@ app.get('/history', checkAgentAuth, async (req, res) => {
 });
 
 // ======================================================
+// HELPERS: Perguntas laterais durante confirmação e pós-booking
+// ======================================================
+
+/**
+ * Detecta se a mensagem é uma pergunta/dúvida lateral durante confirmação,
+ * e não uma resposta de confirmação ou cancelamento.
+ */
+function detectSideQuestion(message, envelope) {
+  if (envelope.intent_override === 'confirm_yes' || envelope.intent_override === 'confirm_no') {
+    return false;
+  }
+  const confirmPatterns = /^(sim|s|yes|confirmar|confirmo|ok|tudo\s*bem|pode|quero)$/i;
+  const cancelPatterns = /^(não|nao|n|no|cancelar|cancela|desistir)$/i;
+  if (confirmPatterns.test(message.trim()) || cancelPatterns.test(message.trim())) {
+    return false;
+  }
+  const questionPatterns = /\?|parcela|cartão|cartao|plano|endereço|endereco|estacion|estaciona|como cheg|como pago|pagamento|aceita|convênio|convenio|valor|quanto|custo|esperar|aguardar|demora|quanto tempo|preciso trazer|preciso levar|jejum|documentos?/i;
+  if (questionPatterns.test(message)) {
+    return true;
+  }
+  if (message.trim().length > 30) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Responde uma dúvida lateral via LLM usando contexto da clínica.
+ * Chamado quando paciente faz pergunta durante o fluxo de confirmação.
+ */
+async function answerSideQuestion(question, state, clinicKb, previousMessages) {
+  const systemPrompt = `Você é uma secretária virtual de clínica médica chamada ${state.clinic_name || 'Lara'}.
+O paciente está no processo de confirmar um agendamento e fez uma pergunta antes de confirmar.
+Responda de forma clara, direta e amigável usando as informações disponíveis da clínica.
+Se não souber a resposta, diga que vai verificar e sugira contato direto com a clínica.
+Seja concisa (máximo 3 linhas). NÃO mencione o agendamento nesta resposta — isso virá na mensagem seguinte.
+
+BASE DE CONHECIMENTO DA CLÍNICA:
+${clinicKb || 'Informações da clínica não disponíveis.'}
+
+CONTEXTO DO AGENDAMENTO SENDO CONFIRMADO:
+- Médico: ${state.doctor_name || 'não informado'}
+- Especialidade: ${state.specialty || 'não informada'}
+- Data: ${state.preferred_date || 'não informada'}
+- Horário: ${state.preferred_time || 'não informado'}`;
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...previousMessages.slice(-4),
+    { role: 'user', content: question },
+  ];
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4.1',
+    messages,
+    max_tokens: 200,
+    temperature: 0.4,
+  });
+
+  return response.choices[0].message.content.trim();
+}
+
+/**
+ * Responde perguntas do paciente após o agendamento ter sido confirmado.
+ */
+async function answerPostBookingQuestion(question, state, clinicKb, previousMessages) {
+  const systemPrompt = `Você é uma secretária virtual de clínica médica chamada ${state.clinic_name || 'Lara'}.
+O paciente acabou de confirmar um agendamento e fez uma pergunta adicional.
+Responda de forma clara, direta e amigável.
+Se a pergunta for sobre o agendamento confirmado, use os dados disponíveis.
+Se não souber a resposta, diga que vai verificar e sugira contato direto com a clínica.
+Seja concisa (máximo 4 linhas).
+
+BASE DE CONHECIMENTO DA CLÍNICA:
+${clinicKb || 'Informações da clínica não disponíveis.'}
+
+AGENDAMENTO CONFIRMADO:
+- Paciente: ${state.patient_name || 'não informado'}
+- Médico: ${state.doctor_name || 'não informado'}
+- Especialidade: ${state.specialty || 'não informada'}
+- Data: ${state.preferred_date || 'não informada'}
+- Horário: ${state.preferred_time || 'não informado'}`;
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...previousMessages.slice(-4),
+    { role: 'user', content: question },
+  ];
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4.1',
+    messages,
+    max_tokens: 250,
+    temperature: 0.4,
+  });
+
+  return response.choices[0].message.content.trim();
+}
+
+// ======================================================
 // ROTA PRINCIPAL: /process
 // ======================================================
 app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) => {
@@ -3317,6 +3417,44 @@ if (conversationState?.booking_state === BOOKING_STATES.BOOKED && conversationSt
       }],
       debug: DEBUG ? { source: 'booked_interceptor' } : undefined,
     });
+  } else {
+    // Paciente em estado BOOKED mas não perguntando sobre detalhes do agendamento
+    const wantsNewBooking = /agendar|novo|outra|remarcar|consulta|médico|doctor/i.test(envelope.message_text)
+      || envelope.intent_override === 'schedule_new'
+      || envelope.intent_override === 'reschedule';
+
+    if (wantsNewBooking) {
+      // Resetar estado para iniciar novo fluxo de agendamento
+      const resetFields = {
+        booking_state: BOOKING_STATES.IDLE,
+        conversation_stage: 'active',
+        pending_fields: [],
+        doctor_id: null, doctor_name: null, specialty: null,
+        preferred_date: null, preferred_time: null, preferred_date_iso: null,
+        patient_name: null, appointment_confirmed: false, last_appointment_id: null,
+      };
+      await updateConversationState(supabase, envelope.clinic_id, envelope.from, resetFields);
+      // Atualizar activeConvState local para que mergeExtractedSlots use o estado resetado
+      Object.assign(activeConvState, resetFields);
+      // Não fazer return — cair para o fluxo normal de agendamento
+    } else {
+      // Pergunta geral pós-booking → responder com LLM e contexto do agendamento
+      const postAnswer = await answerPostBookingQuestion(
+        envelope.message_text, conversationState, kbContext, previousMessages
+      );
+      await saveConversationTurn({
+        clinicId: envelope.clinic_id,
+        fromNumber: envelope.from,
+        correlationId: envelope.correlation_id,
+        userText: envelope.message_text,
+        assistantText: postAnswer,
+        intentGroup: 'info',
+        intent: 'post_booking_question',
+        slots: null,
+      });
+      clearTimeout(timeoutId);
+      return res.json({ correlation_id: envelope.correlation_id, final_message: postAnswer, actions: [] });
+    }
   }
 }
 
@@ -3986,7 +4124,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
     if (!extracted || extracted.confidence < 0.6 ||
         (hasActiveFlow && !isCancelIntent && extracted?.intent_group === 'other')) {
 
-      if (hasActiveFlow && !isCancelIntent) {
+      if (hasActiveFlow && !isCancelIntent && !(conversationState.booking_state === BOOKING_STATES.CONFIRMING && detectSideQuestion(envelope.message_text, envelope))) {
         // FIX 3: Preservar estado — incrementar stuck_counter_off_topic
         const currentStuckOffTopic = (conversationState.stuck_counter_off_topic || 0) + 1;
         await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
@@ -4241,6 +4379,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
             appointment_confirmed: agendResult?.success || false,
             last_appointment_id: confirmedAppointmentId,
+            ...(agendResult?.success && { conversation_stage: 'post_booking' }),
           });
           // Calcular risco de no-show imediatamente após confirmação (fire-and-forget)
           if (agendResult?.success && confirmedAppointmentId) {
@@ -4386,6 +4525,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
             appointment_confirmed: agendResult?.success || false,
             last_appointment_id: confirmedAppointmentIdText,
+            ...(agendResult?.success && { conversation_stage: 'post_booking' }),
           });
           await saveConversationTurn({
             clinicId: envelope.clinic_id,
@@ -4459,6 +4599,25 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         });
 
       } else {
+        // NOVO: Detectar se é uma pergunta/dúvida lateral — responder e reexibir card
+        if (detectSideQuestion(userSaidConfirmation, envelope)) {
+          const sideAnswer = await answerSideQuestion(userSaidConfirmation, updatedState, kbContext, previousMessages);
+          const confirmationCard = await buildConfirmationMessage(updatedState, updatedState.doctor_name, clinicRules?.name, envelope.clinic_id);
+          const combinedResponse = `${sideAnswer}\n\n---\n${confirmationCard}`;
+          await saveConversationTurn({
+            clinicId: envelope.clinic_id,
+            fromNumber: envelope.from,
+            correlationId: envelope.correlation_id,
+            userText: envelope.message_text,
+            assistantText: combinedResponse,
+            intentGroup: 'info',
+            intent: 'side_question_during_confirmation',
+            slots: null,
+          });
+          clearTimeout(timeoutId);
+          return res.json({ correlation_id: envelope.correlation_id, final_message: combinedResponse, actions: [] });
+        }
+
         // Resposta ambígua → validar data antes de reenviar confirmação
         const ISO_RE_AMB = /^\d{4}-\d{2}-\d{2}$/;
         const ambDateRaw = updatedState.preferred_date_iso || updatedState.preferred_date;
