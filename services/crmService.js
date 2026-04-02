@@ -645,6 +645,115 @@ async function processPostConversation(supabase, patientPhone, clinicId, convers
 }
 
 // ======================================================
+// NO-SHOW RISK PREDICTION
+// ======================================================
+
+/**
+ * Calcula o risco de falta (no-show) para um agendamento específico.
+ * Score 0–100: quanto maior, maior o risco.
+ *
+ * Fórmula:
+ *   Fator A (40%) — Histórico de no-shows do paciente
+ *   Fator B (20%) — Cancelamentos de última hora
+ *   Fator C (20%) — Antecedência do agendamento
+ *   Fator D (20%) — Status de confirmação
+ *
+ * Persiste o resultado em appointments.noshowrisk_*.
+ * NUNCA faz throw — se falhar, retorna { success: false }.
+ *
+ * @param {object} supabase  - Cliente Supabase
+ * @param {string} appointmentId - UUID do agendamento
+ * @param {string} clinicId      - UUID da clínica
+ */
+export async function calcularRiscoFalta(supabase, appointmentId, clinicId) {
+  try {
+    const { data: appt } = await supabase
+      .from('appointments')
+      .select('id, patient_id, status, appointment_date, start_time, created_at')
+      .eq('id', appointmentId)
+      .eq('clinic_id', clinicId)
+      .single();
+
+    if (!appt) return { success: false, error: 'Agendamento não encontrado' };
+
+    const { data: events } = await supabase
+      .from('crm_events')
+      .select('event_type, occurred_at, metadata')
+      .eq('patient_id', appt.patient_id)
+      .eq('clinic_id', clinicId)
+      .order('occurred_at', { ascending: false });
+
+    const eventList = events || [];
+
+    // Fator A: No-shows históricos (max 40)
+    const noShowCount = eventList.filter(e => e.event_type === 'no_show').length;
+    const fatorA = noShowCount === 0 ? 0
+                 : noShowCount === 1 ? 20
+                 : noShowCount === 2 ? 35
+                 : 40;
+
+    // Fator B: Cancelamentos de última hora (max 20)
+    const cancelEvents = eventList.filter(e => e.event_type === 'booking_canceled');
+    let fatorB = 0;
+    for (const cancel of cancelEvents) {
+      const apptDateStr = cancel.metadata?.appointment_date;
+      if (!apptDateStr) continue;
+      const canceledAt = new Date(cancel.occurred_at);
+      const apptDate   = new Date(apptDateStr);
+      const horasAntes = (apptDate - canceledAt) / (1000 * 60 * 60);
+      if (horasAntes < 2)  { fatorB = 20; break; }
+      if (horasAntes < 24) { fatorB = Math.max(fatorB, 10); }
+    }
+
+    // Fator C: Antecedência do agendamento (max 20)
+    const agendadoHa = (Date.now() - new Date(appt.created_at)) / (1000 * 60 * 60);
+    const fatorC = agendadoHa < 2  ? 20
+                 : agendadoHa < 48 ? 5
+                 : 10;
+
+    // Fator D: Status de confirmação (max 20)
+    const agora = new Date();
+    const apptDateTime = new Date(`${appt.appointment_date}T${appt.start_time}`);
+    const minutosParaConsulta = (apptDateTime - agora) / (1000 * 60);
+
+    let fatorD = 0;
+    if (appt.status === 'scheduled') {
+      fatorD = minutosParaConsulta < 60 ? 20 : 15;
+    }
+
+    const score = Math.min(100, fatorA + fatorB + fatorC + fatorD);
+    const label = score >= 70 ? 'ALTO' : score >= 40 ? 'MEDIO' : 'BAIXO';
+
+    await supabase
+      .from('appointments')
+      .update({
+        noshowrisk_score:         score,
+        noshowrisk_label:         label,
+        noshowrisk_calculated_at: new Date().toISOString(),
+      })
+      .eq('id', appointmentId)
+      .eq('clinic_id', clinicId);
+
+    console.log(`[NOSHOWRISK] appointment=${appointmentId} score=${score} label=${label}`);
+    return { success: true, score, label };
+
+  } catch (err) {
+    console.error('[NOSHOWRISK] Erro:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Converte score numérico em label semântica com cor e emoji.
+ * @param {number} score
+ */
+export function getNoShowRiskLabel(score) {
+  if (score >= 70) return { label: 'ALTO',  emoji: '🔴', color: '#E74C3C' };
+  if (score >= 40) return { label: 'MÉDIO', emoji: '🟡', color: '#F39C12' };
+  return             { label: 'BAIXO', emoji: '🟢', color: '#27AE60' };
+}
+
+// ======================================================
 // EXPORTS (ESM)
 // ======================================================
 export {

@@ -13,7 +13,7 @@ import googleCalendarRoutes from './routes/googleCalendarRoutes.js';
 import { schedulingToolsDefinitions, executeSchedulingTool } from './tools/schedulingTools.js';
 import { redisHealthCheck } from './services/redisService.js';
 import { getOrCreateConversation, updateConversationTurn, finalizeConversation } from './services/conversationTracker.js';
-import { processPostConversation, startScoreDecayJob } from './services/crmService.js';
+import { processPostConversation, startScoreDecayJob, calcularRiscoFalta } from './services/crmService.js';
 import { startTaskProcessor } from './services/taskProcessor.js';
 import { createCrmApiRouter } from './routes/crmDashboardRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
@@ -2202,26 +2202,50 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
     // exibir os "..." no WhatsApp do paciente.
     // Falhas aqui nunca interrompem o fluxo principal.
     // ======================================================
-    try {
-      const waConfig = await getClinicWhatsAppConfig(envelope.clinic_id);
+    // fire-and-forget — não bloqueia o pipeline; typing é UX, não lógica
+    getClinicWhatsAppConfig(envelope.clinic_id).then(waConfig => {
       if (waConfig && envelope.correlation_id) {
         const phoneNumberId = envelope.phone_number_id || waConfig.phone_number_id;
-        await markAsReadAndSimulateTyping(phoneNumberId, envelope.correlation_id, waConfig.access_token, 2000);
+        markAsReadAndSimulateTyping(phoneNumberId, envelope.correlation_id, waConfig.access_token, 1500)
+          .catch(e => console.warn('[TypingIndicator] erro silencioso:', e?.message));
       }
-    } catch (_typingErr) {
-      console.warn('[TypingIndicator] Erro ao iniciar typing indicator:', _typingErr?.message);
-    }
+    }).catch(e => console.warn('[TypingIndicator] erro ao buscar config:', e?.message));
 
     // ======================================================
-    // 2) BUSCAR CONFIGURAÇÕES DA CLÍNICA
+    // 2+3) BUSCAR TODAS AS DEPENDÊNCIAS EM PARALELO
+    // settings, kb, doctors, services, conversationState, history
     // ======================================================
-    const { data: settings, error: settingsErr } = await supabase
-      .from('clinic_settings')
-      .select('*')
-      .eq('clinic_id', envelope.clinic_id)
-      .maybeSingle();
+    const [
+      settingsResult,
+      kbResult,
+      doctorsResult,
+      servicesResult,
+      conversationState,
+      historyResult,
+    ] = await Promise.all([
+      supabase.from('clinic_settings').select('*').eq('clinic_id', envelope.clinic_id).maybeSingle(),
+      supabase.from('clinic_kb').select('title, content').eq('clinic_id', envelope.clinic_id).limit(8),
+      supabase.from('doctors').select('id, name, specialty').eq('clinic_id', envelope.clinic_id).eq('active', true),
+      supabase.from('services').select('name, duration_minutes, price').eq('clinic_id', envelope.clinic_id).eq('active', true),
+      loadConversationState(supabase, envelope.clinic_id, envelope.from),
+      supabase.from('conversation_history')
+        .select('role, message_text, created_at')
+        .eq('clinic_id', envelope.clinic_id)
+        .eq('from_number', envelope.from)
+        .order('created_at', { ascending: false })
+        .limit(10),
+    ]);
+
+    const settings    = settingsResult.data;
+    const settingsErr = settingsResult.error;
+    const kbRows      = kbResult.data || [];
+    const kbErr       = kbResult.error;
+    const doctors     = doctorsResult.data || [];
+    const services    = servicesResult.data || [];
+    // historyResult usado mais abaixo no bloco de previousMessages
 
     if (settingsErr) throw settingsErr;
+    if (kbErr) throw kbErr;
 
     if (!settings) {
       log.warn(
@@ -2246,39 +2270,9 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
       policies_text: 'Atendemos de segunda a sexta, das 8h às 18h.',
     };
 
-    // ======================================================
-    // 3) BUSCAR BASE DE CONHECIMENTO (RAG)
-    // ======================================================
-    const { data: kbRows, error: kbErr } = await supabase
-      .from('clinic_kb')
-      .select('title, content')
-      .eq('clinic_id', envelope.clinic_id)
-      .limit(8);
-
-    if (kbErr) throw kbErr;
-
-    const kbContext = (kbRows ?? [])
+    const kbContext = kbRows
       .map((r) => `• ${r.title}: ${r.content}`)
       .join('\n');
-
-    // ======================================================
-    // 3b) BUSCAR MÉDICOS, SERVIÇOS E ESTADO DA CONVERSA
-    // ======================================================
-    const [doctorsResult, servicesResult, conversationState] = await Promise.all([
-      supabase
-        .from('doctors')
-        .select('id, name, specialty')
-        .eq('clinic_id', envelope.clinic_id)
-        .eq('active', true),
-      supabase
-        .from('services')
-        .select('name, duration_minutes, price')
-        .eq('clinic_id', envelope.clinic_id)
-        .eq('active', true),
-      loadConversationState(supabase, envelope.clinic_id, envelope.from),
-    ]);
-    const doctors = doctorsResult.data || [];
-    const services = servicesResult.data || [];
 
     if (DEBUG) {
       log.debug({ state: conversationState }, 'conversation_state_loaded');
@@ -2441,22 +2435,16 @@ extract_intent => {"intent_group":"billing","intent":"procedure_pricing_request"
     let extracted = null;
     let decided = null;
     let skipSchedulingAgent = false;
-// Buscar histórico de conversas — usa o que o N8N enviou ou vai ao banco
+// Buscar histórico de conversas — usa o que o N8N enviou ou o pré-carregado pelo Promise.all
 let previousMessages = envelope.context?.previous_messages || [];
 
 if (previousMessages.length === 0) {
-  // CORREÇÃO Problema 2: buscar apenas as últimas 10 mensagens (evita timeout por excesso de tokens)
-  const { data: historyRows } = await supabase
-    .from('conversation_history')
-    .select('role, message_text, created_at')
-    .eq('clinic_id', envelope.clinic_id)
-    .eq('from_number', envelope.from)
-    .order('created_at', { ascending: false })
-    .limit(10);
+  // historyRows já foi buscado no Promise.all paralelo acima (sem custo extra)
+  const historyRows = historyResult.data || [];
 
-  if (historyRows && historyRows.length > 0) {
+  if (historyRows.length > 0) {
     // Inverter para ordem cronológica correta antes de passar ao OpenAI
-    previousMessages = historyRows.reverse().map(r => ({
+    previousMessages = [...historyRows].reverse().map(r => ({
       role: r.role,
       content: r.message_text,
     }));
@@ -4254,6 +4242,11 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
             appointment_confirmed: agendResult?.success || false,
             last_appointment_id: confirmedAppointmentId,
           });
+          // Calcular risco de no-show imediatamente após confirmação (fire-and-forget)
+          if (agendResult?.success && confirmedAppointmentId) {
+            calcularRiscoFalta(supabase, confirmedAppointmentId, envelope.clinic_id)
+              .catch(e => console.warn('[NOSHOWRISK] erro não-bloqueante:', e?.message));
+          }
           await saveConversationTurn({
             clinicId: envelope.clinic_id,
             fromNumber: envelope.from,
@@ -5275,6 +5268,12 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
               trigger: 'criar_agendamento_success',
             }, envelope.clinic_id, envelope.from);
 
+            // Calcular risco de no-show imediatamente após agendamento (fire-and-forget)
+            if (toolResult.appointment_id) {
+              calcularRiscoFalta(supabase, toolResult.appointment_id, envelope.clinic_id)
+                .catch(e => console.warn('[NOSHOWRISK] erro não-bloqueante:', e?.message));
+            }
+
             // — Finalizar tracking da conversa (PONTO E) —
             if (conversationRecord) {
               try {
@@ -5608,4 +5607,151 @@ app.listen(PORT, "0.0.0.0", () => {
   } catch (err) {
     log.warn({ err: err.message }, '[DECAY] Falha ao iniciar score decay job — server continua sem decay');
   }
+
+  // ============================================================
+  // JOB: Calcular risco de no-show para consultas de hoje
+  // Frequência: a cada 30 minutos
+  // ============================================================
+  setInterval(async () => {
+    console.log('[NOSHOWRISK_JOB] Calculando risco de falta para consultas de hoje...');
+    try {
+      const tz = 'America/Cuiaba';
+      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+
+      const { data: consultas } = await supabase
+        .from('appointments')
+        .select('id, clinic_id')
+        .eq('appointment_date', todayStr)
+        .in('status', ['scheduled', 'confirmed'])
+        .is('noshowrisk_score', null);
+
+      if (!consultas?.length) return;
+      console.log(`[NOSHOWRISK_JOB] ${consultas.length} consultas para avaliar`);
+
+      // Processar em lotes de 10 em paralelo
+      for (let i = 0; i < consultas.length; i += 10) {
+        await Promise.allSettled(
+          consultas.slice(i, i + 10).map(c => calcularRiscoFalta(supabase, c.id, c.clinic_id))
+        );
+      }
+    } catch (err) {
+      console.error('[NOSHOWRISK_JOB] Erro:', err.message);
+    }
+  }, 30 * 60 * 1000);
+
+  // ============================================================
+  // JOB: Verificar consultas em risco e disparar para waitlist
+  // Frequência: a cada 5 minutos
+  // ============================================================
+  setInterval(async () => {
+    try {
+      const tz = 'America/Cuiaba';
+      const agora = new Date();
+      const todayStr = agora.toLocaleDateString('en-CA', { timeZone: tz });
+      const horaAtual = agora.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const em60min   = new Date(agora.getTime() + 60 * 60 * 1000)
+        .toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      const { data: consultasRisco } = await supabase
+        .from('appointments')
+        .select('id, clinic_id, patient_id, appointment_date, start_time, status, noshowrisk_score, noshowrisk_label, doctors(name), services(name)')
+        .eq('appointment_date', todayStr)
+        .gte('start_time', horaAtual)
+        .lte('start_time', em60min)
+        .in('status', ['scheduled', 'confirmed'])
+        .or('noshowrisk_score.gte.60,status.eq.scheduled');
+
+      if (!consultasRisco?.length) return;
+
+      for (const consulta of consultasRisco) {
+        const risco = await calcularRiscoFalta(supabase, consulta.id, consulta.clinic_id);
+        if (!risco.success || risco.score < 50) continue;
+
+        // Verificar se já disparou para esta consulta
+        const { data: jaDisparou } = await supabase
+          .from('waitlist_dispatch_log')
+          .select('id')
+          .eq('appointment_id', consulta.id)
+          .limit(1);
+
+        if (jaDisparou?.length > 0) continue;
+
+        // Buscar pacientes na lista de espera para o mesmo médico/especialidade
+        const { data: listaEspera } = await supabase
+          .from('clinic_waitlist')
+          .select('id, patient_name, patient_phone, preferred_period, notes')
+          .eq('clinic_id', consulta.clinic_id)
+          .eq('status', 'waiting')
+          .limit(5);
+
+        if (!listaEspera?.length) continue;
+
+        const minutosParaConsulta = Math.round(
+          (new Date(`${consulta.appointment_date}T${consulta.start_time}`) - agora) / 60000
+        );
+
+        const waConfig = await getClinicWhatsAppConfig(consulta.clinic_id);
+        if (!waConfig) continue;
+
+        for (const entrada of listaEspera) {
+          const primeiroNome = entrada.patient_name.split(' ')[0];
+          const horario      = consulta.start_time.substring(0, 5);
+          const nomeMedico   = consulta.doctors?.name || 'médico';
+
+          const mensagem =
+            `Oi ${primeiroNome}! 😊 Sou a Lara da clínica.\n\n` +
+            `Surgiu um horário disponível hoje às *${horario}* ` +
+            `com *${nomeMedico}* ` +
+            `(${minutosParaConsulta} minutos a partir de agora).\n\n` +
+            `Você tem interesse em aproveitar essa vaga? Responda *SIM* para confirmar! ✅`;
+
+          try {
+            let cleanPhone = entrada.patient_phone.replace(/[\s\-\+\(\)]/g, '');
+            if (cleanPhone.length === 11) cleanPhone = '55' + cleanPhone;
+            if (cleanPhone.length === 10) cleanPhone = '55' + cleanPhone;
+
+            const resp = await fetch(
+              `https://graph.facebook.com/v19.0/${waConfig.phone_number_id}/messages`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${waConfig.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  messaging_product: 'whatsapp',
+                  to: cleanPhone,
+                  type: 'text',
+                  text: { body: mensagem },
+                }),
+              }
+            );
+
+            if (resp.ok) {
+              await supabase.from('waitlist_dispatch_log').insert({
+                clinic_id:         consulta.clinic_id,
+                appointment_id:    consulta.id,
+                waitlist_entry_id: entrada.id,
+                message_sent:      mensagem,
+              });
+
+              await supabase
+                .from('clinic_waitlist')
+                .update({ status: 'contacted', updated_at: new Date().toISOString() })
+                .eq('id', entrada.id);
+
+              console.log(`[WAITLIST_DISPATCH] Notificado: ${entrada.patient_name} | consulta=${consulta.id}`);
+            } else {
+              const errText = await resp.text().catch(() => '');
+              console.warn(`[WAITLIST_DISPATCH] Falha ao enviar para ${entrada.patient_phone}: ${errText.substring(0, 200)}`);
+            }
+          } catch (sendErr) {
+            console.error(`[WAITLIST_DISPATCH] Erro ao enviar para ${entrada.patient_phone}:`, sendErr.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[WAITLIST_DISPATCH_JOB] Erro:', err.message);
+    }
+  }, 5 * 60 * 1000);
 });

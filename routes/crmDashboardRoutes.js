@@ -33,7 +33,7 @@
 
 import { Router } from 'express';
 import { authMiddleware, requireOwner } from '../middleware/authMiddleware.js';
-import { calculateLeadScore, getScoreLabel } from '../services/crmService.js';
+import { calculateLeadScore, getScoreLabel, getNoShowRiskLabel } from '../services/crmService.js';
 
 // Helper: retorna "hoje" no timezone correto (evita UTC ≠ horário local)
 function todayInTz(tz) {
@@ -1444,6 +1444,38 @@ export function createCrmApiRouter(supabase) {
       return res.json({ success: true });
     } catch (err) {
       console.error('[CRM-API] PATCH /waitlist/:id/status:', err.message);
+      return res.status(500).json({ error: 'Erro interno' });
+    }
+  });
+
+  // GET /appointments/noshowrisk — Agendamentos do dia com score de risco de no-show
+  router.get('/appointments/noshowrisk', async (req, res) => {
+    try {
+      const tz = 'America/Cuiaba';
+      const targetDate = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: tz });
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .select(`
+          id, start_time, status, noshowrisk_score, noshowrisk_label, noshowrisk_calculated_at,
+          patients(name, phone),
+          doctors(name)
+        `)
+        .eq('clinic_id', req.clinicId)
+        .eq('appointment_date', targetDate)
+        .in('status', ['scheduled', 'confirmed'])
+        .order('start_time');
+
+      if (error) return res.status(500).json({ error: error.message });
+
+      const appointments = (data || []).map(appt => ({
+        ...appt,
+        risk: appt.noshowrisk_score != null ? getNoShowRiskLabel(appt.noshowrisk_score) : null,
+      }));
+
+      return res.json({ appointments, date: targetDate });
+    } catch (err) {
+      console.error('[CRM-API] GET /appointments/noshowrisk:', err.message);
       return res.status(500).json({ error: 'Erro interno' });
     }
   });
