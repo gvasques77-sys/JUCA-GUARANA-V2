@@ -411,7 +411,13 @@
             full.treatment_plan  && h(SOAPBlock, { label: "Plano Tratamento", content: full.treatment_plan }),
             full.follow_up_date  && h("div", { style: { fontSize: 13, color: "var(--t2)", paddingTop: 4 } }, "Retorno: " + fmtDate(full.follow_up_date)),
             !full.soap_subjective && !full.soap_objective && !full.soap_assessment && !full.soap_plan && !full.diagnosis_notes && !full.treatment_plan &&
-              h("div", { style: { textAlign: "center", color: "var(--t3)", fontSize: 13, padding: "16px 0" } }, "Nenhum detalhe SOAP registrado.")
+              h("div", { style: { textAlign: "center", color: "var(--t3)", fontSize: 13, padding: "16px 0" } }, "Nenhum detalhe SOAP registrado."),
+            h("div", { style: { display: "flex", justifyContent: "flex-end", paddingTop: 12, borderTop: "1px solid var(--bdr)", marginTop: 4 } },
+              h("button", {
+                onClick: function(e) { e.stopPropagation(); window.open("/crm/prontuario-atendimento.html?consulta=" + c.id + "&patient=" + c.patient_id, "_blank"); },
+                style: { background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Inter", boxShadow: "0 2px 8px rgba(11,138,111,.25)" }
+              }, "\u270F Abrir Atendimento")
+            )
           ) : h("div", { style: { color: "var(--t3)", fontSize: 13, paddingTop: 16 } }, "Nao foi possivel carregar os detalhes.")
         )
       );

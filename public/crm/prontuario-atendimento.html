@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atendimento — CLINICORE</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #EFF6F3; --bg2: #FFFFFF; --card: #FFFFFF; --cardH: #F8FDFB;
+      --bdr: rgba(11,138,111,.10); --bdr-h: rgba(11,138,111,.22); --bdr-a: rgba(11,138,111,.50);
+      --t1: #0F172A; --t2: #475569; --t3: #94A3B8;
+      --accent: #0B8A6F; --accent-l: #10B981; --accent-bg: #D1FAE5;
+      --accent-r: #EF4444; --accent-r-bg: #FEE2E2;
+      --accent-a: #D97706; --accent-a-bg: #FEF3C7;
+      --accent-b: #2563EB; --accent-b-bg: #DBEAFE;
+      --shadow: 0 4px 24px rgba(11,138,111,.07), 0 1px 3px rgba(0,0,0,.05);
+      --shadow-sm: 0 2px 8px rgba(0,0,0,.06);
+      --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 20px;
+      --ease-out: cubic-bezier(0.16,1,0.3,1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--t1); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: var(--bdr-h); border-radius: 3px; }
+    textarea { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.7; resize: vertical; }
+    button { font-family: 'Inter', sans-serif; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .fi { animation: fadeIn 280ms var(--ease-out) both; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--bdr); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto; }
+    .soap-tab { padding: 8px 18px; border: none; background: none; border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500; color: var(--t3); cursor: pointer; transition: all 150ms; font-family: Inter; margin-bottom: -1px; }
+    .soap-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; background: rgba(11,138,111,.04); }
+    .soap-tab:hover:not(.active) { color: var(--t2); }
+    .field-label { font-size: 11px; font-weight: 700; color: var(--t3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    input, select { font-family: Inter; font-size: 13px; color: var(--t1); background: #fff; border: 1px solid var(--bdr); border-radius: var(--radius-sm); padding: 9px 12px; width: 100%; outline: none; transition: border 150ms; }
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(11,138,111,.08); }
+    .btn-primary { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 9px 20px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: Inter; box-shadow: 0 2px 8px rgba(11,138,111,.25); transition: all 180ms; }
+    .btn-primary:hover { background: #0A7A62; transform: translateY(-1px); }
+    .btn-primary:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+    .btn-secondary { background: transparent; color: var(--t2); border: 1px solid var(--bdr); border-radius: var(--radius-sm); padding: 9px 16px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: Inter; transition: all 150ms; }
+    .btn-secondary:hover { border-color: var(--bdr-h); color: var(--t1); }
+    .badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+    .save-indicator { font-size: 11px; color: var(--accent); font-weight: 500; opacity: 0; transition: opacity 400ms; }
+    .save-indicator.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="root" style="height:100vh;display:flex;flex-direction:column;"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+
+  <script>
+    var API = '/crm/api';
+    var SUPABASE_URL = 'https://edamtnxcwuuydwwbimvz.supabase.co';
+    var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkYW10bnhjd3V1eWR3d2JpbXZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0NDI2MzksImV4cCI6MjA4NjAxODYzOX0.uzu52-qEHatsBoQBJj145wDROcbuYSNFbSzgWDrqUeg';
+    var sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    var _currentToken = null;
+    sbClient.auth.onAuthStateChange(function(event, session) {
+      if (session && session.access_token) { _currentToken = session.access_token; }
+      else { _currentToken = null; }
+    });
+    function getToken() { return _currentToken; }
+    function logout() { _currentToken = null; sbClient.auth.signOut(); window.location.href = '/crm/login.html'; }
+    async function initToken() {
+      var res = await sbClient.auth.getSession();
+      if (res.error || !res.data.session) return null;
+      _currentToken = res.data.session.access_token;
+      return _currentToken;
+    }
+    async function refreshToken() {
+      try {
+        var res = await sbClient.auth.refreshSession();
+        if (res.error || !res.data.session) return null;
+        _currentToken = res.data.session.access_token;
+        return _currentToken;
+      } catch(e) { return null; }
+    }
+    function q(p, o) {
+      var token = getToken();
+      if (!token) {
+        return refreshToken().then(function(t) {
+          if (!t) { window.location.href = '/crm/login.html'; return null; }
+          return q(p, o);
+        });
+      }
+      var opts = o || {};
+      opts.headers = Object.assign({'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, opts.headers || {});
+      return fetch(API + p, opts).then(function(r) {
+        if (r.status === 401) {
+          return refreshToken().then(function(t) {
+            if (!t) { logout(); return null; }
+            opts.headers['Authorization'] = 'Bearer ' + t;
+            return fetch(API + p, opts).then(function(r2) {
+              if (r2.status === 401 || r2.status === 403) { logout(); return null; }
+              return r2.json();
+            });
+          });
+        }
+        if (r.status === 403) { logout(); return null; }
+        return r.json();
+      });
+    }
+    function getParams() {
+      var p = new URLSearchParams(window.location.search);
+      return { consultaId: p.get('consulta'), patientId: p.get('patient') };
+    }
+    function fmtDate(d) {
+      if (!d) return '--';
+      return new Date(d).toLocaleDateString('pt-BR');
+    }
+  </script>
+
+  <script type="text/babel">
+    var h = React.createElement;
+    var params = getParams();
+
+    /* ---- Componentes utilitarios ---- */
+    function LoadingFull() {
+      return h('div', { style: { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, background: 'var(--bg)' } },
+        h('div', { className: 'spinner' }),
+        h('div', { style: { fontSize: 14, color: 'var(--t2)' } }, 'Carregando atendimento...')
+      );
+    }
+    function ErrorFull({ msg }) {
+      return h('div', { style: { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 } },
+        h('div', { style: { fontSize: 36 } }, '\u26A0\uFE0F'),
+        h('div', { style: { fontSize: 15, fontWeight: 600, color: 'var(--t1)' } }, 'Erro ao carregar'),
+        h('div', { style: { fontSize: 13, color: 'var(--t2)' } }, msg),
+        h('button', { className: 'btn-secondary', style: { marginTop: 8 }, onClick: function() { window.history.back(); } }, '\u2190 Voltar')
+      );
+    }
+
+    /* ---- Topbar ---- */
+    function Topbar({ patient, consulta, saving, saved, onFinalize }) {
+      var statusColors = { em_andamento: { bg: 'var(--accent-b-bg)', c: 'var(--accent-b)' }, finalizada: { bg: 'var(--accent-bg)', c: 'var(--accent)' }, cancelada: { bg: '#F1F5F9', c: 'var(--t3)' } };
+      var sc = consulta ? (statusColors[consulta.status] || statusColors.em_andamento) : statusColors.em_andamento;
+      return h('div', { style: { height: 60, background: '#fff', borderBottom: '1px solid var(--bdr)', display: 'flex', alignItems: 'center', padding: '0 24px', gap: 16, flexShrink: 0, boxShadow: '0 1px 0 var(--bdr)' } },
+        h('button', { className: 'btn-secondary', style: { padding: '6px 14px', fontSize: 13 }, onClick: function() { if (patient) window.location.href = '/crm/prontuario.html?id=' + patient.id; else window.history.back(); } }, '\u2190 Prontuario'),
+        h('div', { style: { width: 1, height: 24, background: 'var(--bdr)' } }),
+        h('div', { style: { flex: 1 } },
+          h('div', { style: { fontSize: 15, fontWeight: 700, color: 'var(--t1)' } }, patient ? patient.name : '--'),
+          consulta && h('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 1 } }, fmtDate(consulta.consultation_date) + ' \u00B7 ' + (consulta.consultation_type || 'presencial'))
+        ),
+        consulta && h('span', { className: 'badge', style: { background: sc.bg, color: sc.c } }, consulta.status ? consulta.status.replace(/_/g, ' ') : '--'),
+        h('div', { className: 'save-indicator' + (saved ? ' visible' : '') }, '\u2713 Salvo'),
+        saving && h('div', { style: { fontSize: 11, color: 'var(--t3)' } }, 'Salvando...'),
+        consulta && consulta.status !== 'finalizada' && h('button', { className: 'btn-primary', onClick: onFinalize, style: { padding: '8px 20px' } }, '\u2713 Finalizar Consulta'),
+        h('button', { onClick: logout, style: { background: 'none', border: 'none', color: 'var(--t3)', fontSize: 12, cursor: 'pointer' } }, 'Sair')
+      );
+    }
+
+    /* ---- Sidebar esquerda ---- */
+    function Sidebar({ patient, consulta, vitals, allergies }) {
+      return h('div', { style: { width: 240, background: '#fff', borderRight: '1px solid var(--bdr)', overflowY: 'auto', flexShrink: 0, padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 20 } },
+        /* Paciente */
+        h('div', null,
+          h('div', { style: { fontSize: 10, fontWeight: 700, color: 'var(--t3)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 10 } }, 'PACIENTE'),
+          h('div', { style: { fontSize: 14, fontWeight: 700, color: 'var(--t1)', marginBottom: 4 } }, patient ? patient.name : '--'),
+          patient && patient.birth_date && h('div', { style: { fontSize: 12, color: 'var(--t3)' } }, fmtDate(patient.birth_date)),
+          patient && patient.phone && h('div', { style: { fontSize: 12, color: 'var(--t2)', marginTop: 2 } }, patient.phone)
+        ),
+        /* Alergias */
+        allergies && allergies.length > 0 && h('div', null,
+          h('div', { style: { fontSize: 10, fontWeight: 700, color: 'var(--accent-r)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 8 } }, '\u26A0 ALERGIAS'),
+          allergies.map(function(a, i) {
+            return h('div', { key: i, style: { fontSize: 12, color: 'var(--accent-r)', background: 'var(--accent-r-bg)', borderRadius: 6, padding: '4px 8px', marginBottom: 4, fontWeight: 500 } }, a.allergen);
+          })
+        ),
+        /* Ultimos vitais */
+        vitals && h('div', null,
+          h('div', { style: { fontSize: 10, fontWeight: 700, color: 'var(--t3)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 10 } }, 'ULTIMOS VITAIS'),
+          h('div', { style: { fontSize: 10, color: 'var(--t3)', marginBottom: 8 } }, fmtDate(vitals.measured_at)),
+          [
+            vitals.blood_pressure_systolic && { l: 'PA', v: vitals.blood_pressure_systolic + '/' + vitals.blood_pressure_diastolic + ' mmHg' },
+            vitals.heart_rate && { l: 'FC', v: vitals.heart_rate + ' bpm' },
+            vitals.temperature && { l: 'Temp', v: vitals.temperature + ' \u00B0C' },
+            vitals.oxygen_saturation && { l: 'SpO2', v: vitals.oxygen_saturation + '%' },
+            vitals.weight_kg && { l: 'Peso', v: vitals.weight_kg + ' kg' }
+          ].filter(Boolean).map(function(item, i) {
+            return h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid var(--bdr)' } },
+              h('span', { style: { fontSize: 11, color: 'var(--t3)', width: 36 } }, item.l),
+              h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--t1)', fontFamily: 'JetBrains Mono' } }, item.v)
+            );
+          })
+        )
+      );
+    }
+
+    /* ---- Editor SOAP ---- */
+    function SOAPEditor({ consulta, onChange, onSave, saving }) {
+      var [activeSection, setActiveSection] = React.useState('S');
+      var sections = [
+        { id: 'S', label: 'S - Subjetivo',  field: 'soap_subjective',  placeholder: 'Queixa principal, historia da doenca atual, sintomas relatados pelo paciente...' },
+        { id: 'O', label: 'O - Objetivo',   field: 'soap_objective',   placeholder: 'Exame fisico, sinais vitais, achados objetivos...' },
+        { id: 'A', label: 'A - Avaliacao',  field: 'soap_assessment',  placeholder: 'Hipotese diagnostica, CID-10, raciocinio clinico...' },
+        { id: 'P', label: 'P - Plano',      field: 'soap_plan',        placeholder: 'Conduta, prescricao, exames solicitados, orientacoes...' },
+        { id: 'N', label: 'Notas',          field: 'diagnosis_notes',  placeholder: 'Notas adicionais do diagnostico...' },
+        { id: 'T', label: 'Tratamento',     field: 'treatment_plan',   placeholder: 'Plano de tratamento detalhado...' }
+      ];
+      var active = sections.find(function(s) { return s.id === activeSection; });
+      var charCount = active ? (consulta[active.field] || '').length : 0;
+      return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
+        /* Sub-tabs SOAP */
+        h('div', { style: { background: '#fff', borderBottom: '1px solid var(--bdr)', padding: '0 20px', display: 'flex', flexShrink: 0 } },
+          sections.map(function(s) {
+            var isA = activeSection === s.id;
+            var hasContent = !!(consulta[s.field] && consulta[s.field].trim());
+            return h('button', { key: s.id, className: 'soap-tab' + (isA ? ' active' : ''), onClick: function() { setActiveSection(s.id); } },
+              s.label,
+              hasContent && h('span', { style: { marginLeft: 5, width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' } })
+            );
+          })
+        ),
+        /* Area de texto */
+        h('div', { style: { flex: 1, padding: 20, display: 'flex', flexDirection: 'column', gap: 8 } },
+          active && h('textarea', {
+            key: active.id,
+            value: consulta[active.field] || '',
+            placeholder: active.placeholder,
+            onChange: function(e) { onChange(active.field, e.target.value); },
+            style: { flex: 1, width: '100%', border: '1px solid var(--bdr)', borderRadius: 'var(--radius-md)', padding: 16, fontSize: 14, lineHeight: 1.7, color: 'var(--t1)', background: '#fff', outline: 'none', transition: 'border 150ms', minHeight: 0 },
+            onFocus: function(e) { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px rgba(11,138,111,.08)'; },
+            onBlur: function(e) { e.target.style.borderColor = 'var(--bdr)'; e.target.style.boxShadow = 'none'; onSave(); }
+          }),
+          h('div', { style: { fontSize: 11, color: 'var(--t3)', textAlign: 'right' } }, charCount + ' caracteres')
+        )
+      );
+    }
+
+    /* ---- Painel inferior: CID-10 + Prescricao + Retorno ---- */
+    function PainelInferior({ consulta, onChange, onSave, patientId, consultaId }) {
+      var [activePanel, setActivePanel] = React.useState('cid');
+      var [prescItems, setPrescItems]   = React.useState([]);
+      var [loadingPresc, setLoadingPresc] = React.useState(true);
+      var [showPrescModal, setShowPrescModal] = React.useState(false);
+      var [savingPresc, setSavingPresc] = React.useState(false);
+      var [prescList, setPrescList] = React.useState([{ medication: '', dosage: '', frequency: '', instructions: '' }]);
+
+      React.useEffect(function() {
+        q('/prontuario/patient/' + patientId + '/prescriptions')
+          .then(function(r) { if (r && Array.isArray(r)) setPrescItems(r); })
+          .finally(function() { setLoadingPresc(false); });
+      }, [patientId]);
+
+      function addPrescLine() {
+        setPrescList(function(p) { return p.concat([{ medication: '', dosage: '', frequency: '', instructions: '' }]); });
+      }
+      function setPrescLine(i, k, v) {
+        setPrescList(function(p) { return p.map(function(item, idx) { if (idx !== i) return item; var o = {}; o[k] = v; return Object.assign({}, item, o); }); });
+      }
+      function removePrescLine(i) {
+        setPrescList(function(p) { return p.filter(function(_, idx) { return idx !== i; }); });
+      }
+
+      function handleSavePresc() {
+        var items = prescList.filter(function(l) { return l.medication && l.medication.trim(); }).map(function(l) {
+          return { medication: l.medication, dosage: l.dosage, frequency: l.frequency, instructions: l.instructions };
+        });
+        if (items.length === 0) return;
+        setSavingPresc(true);
+        var payload = { patient_id: patientId, items: items };
+        q('/prontuario/consultation/' + consultaId + '/prescriptions', { method: 'POST', body: JSON.stringify(payload) })
+          .then(function(r) {
+            if (r && r.id) {
+              setPrescItems(function(p) { return [r].concat(p); });
+              setShowPrescModal(false);
+              setPrescList([{ medication: '', dosage: '', frequency: '', instructions: '' }]);
+            }
+          }).finally(function() { setSavingPresc(false); });
+      }
+
+      var panels = [
+        { id: 'cid',       label: 'CID-10' },
+        { id: 'prescricao', label: 'Prescricao' },
+        { id: 'retorno',   label: 'Retorno / Plano' }
+      ];
+
+      return h('div', { style: { borderTop: '1px solid var(--bdr)', background: '#fff', flexShrink: 0 } },
+        /* Sub-tabs */
+        h('div', { style: { display: 'flex', borderBottom: '1px solid var(--bdr)', padding: '0 20px' } },
+          panels.map(function(p) {
+            var isA = activePanel === p.id;
+            return h('button', { key: p.id, className: 'soap-tab' + (isA ? ' active' : ''), onClick: function() { setActivePanel(p.id); } }, p.label);
+          })
+        ),
+
+        /* Painel CID-10 */
+        activePanel === 'cid' && h('div', { style: { padding: '16px 20px', display: 'flex', gap: 12, alignItems: 'flex-start' } },
+          h('div', { style: { width: 140 } },
+            h('div', { className: 'field-label' }, 'Codigo CID'),
+            h('input', { type: 'text', value: consulta.main_diagnosis_cid || '', placeholder: 'ex: J45.0', onChange: function(e) { onChange('main_diagnosis_cid', e.target.value.toUpperCase()); }, onBlur: onSave, style: { fontFamily: 'JetBrains Mono', fontWeight: 600, textTransform: 'uppercase' } })
+          ),
+          h('div', { style: { flex: 1 } },
+            h('div', { className: 'field-label' }, 'Descricao do Diagnostico'),
+            h('input', { type: 'text', value: consulta.diagnosis_cid_description || '', placeholder: 'ex: Asma predominantemente alergica', onChange: function(e) { onChange('diagnosis_cid_description', e.target.value); }, onBlur: onSave })
+          ),
+          h('div', { style: { width: 130 } },
+            h('div', { className: 'field-label' }, 'Tipo'),
+            h('select', { value: consulta.diagnosis_type_field || 'principal', onChange: function(e) { onChange('diagnosis_type_field', e.target.value); onSave(); } },
+              h('option', { value: 'principal' }, 'Principal'),
+              h('option', { value: 'secundario' }, 'Secundario'),
+              h('option', { value: 'cronico' }, 'Cronico')
+            )
+          )
+        ),
+
+        /* Painel Prescricao */
+        activePanel === 'prescricao' && h('div', { style: { padding: '16px 20px' } },
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
+            h('div', { style: { fontSize: 13, fontWeight: 600, color: 'var(--t1)' } }, 'Prescricoes desta consulta (' + prescItems.length + ')'),
+            h('button', { className: 'btn-primary', style: { padding: '6px 14px', fontSize: 12 }, onClick: function() { setShowPrescModal(true); } }, '+ Nova Prescricao')
+          ),
+          loadingPresc ? h('div', { style: { color: 'var(--t3)', fontSize: 13 } }, 'Carregando...') :
+          prescItems.length === 0 ? h('div', { style: { color: 'var(--t3)', fontSize: 13, fontStyle: 'italic' } }, 'Nenhuma prescricao registrada nesta consulta.') :
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 140, overflowY: 'auto' } },
+            prescItems.slice(0, 5).map(function(p, i) {
+              var items = Array.isArray(p.items) ? p.items : [];
+              return h('div', { key: i, style: { background: 'var(--bg)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 12 } },
+                h('div', { style: { fontSize: 10, color: 'var(--t3)', marginBottom: 4 } }, fmtDate(p.prescription_date)),
+                items.slice(0, 3).map(function(it, j) {
+                  return h('div', { key: j, style: { color: 'var(--t1)', marginBottom: 2 } },
+                    h('span', { style: { fontWeight: 600 } }, (typeof it === 'object' ? it.medication : it) || '--'),
+                    typeof it === 'object' && it.dosage && h('span', { style: { color: 'var(--t2)' } }, ' - ' + it.dosage)
+                  );
+                }),
+                items.length > 3 && h('div', { style: { color: 'var(--t3)', fontSize: 11 } }, '+ ' + (items.length - 3) + ' mais')
+              );
+            })
+          ),
+          /* Modal prescricao */
+          showPrescModal && h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 } },
+            h('div', { style: { background: '#fff', borderRadius: 'var(--radius-xl)', padding: 28, width: '90%', maxWidth: 640, maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,.2)' } },
+              h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 } },
+                h('div', { style: { fontSize: 16, fontWeight: 700, color: 'var(--t1)' } }, 'Nova Prescricao'),
+                h('button', { style: { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--t3)' }, onClick: function() { setShowPrescModal(false); } }, '\u00D7')
+              ),
+              h('div', { style: { fontSize: 11, color: 'var(--t3)', marginBottom: 14, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em' } }, 'Medicamentos'),
+              prescList.map(function(line, i) {
+                return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: 8, marginBottom: 8, alignItems: 'end' } },
+                  h('div', null,
+                    i === 0 && h('div', { className: 'field-label', style: { marginBottom: 4 } }, 'Medicamento'),
+                    h('input', { type: 'text', value: line.medication, placeholder: 'Nome do medicamento', onChange: function(e) { setPrescLine(i, 'medication', e.target.value); } })
+                  ),
+                  h('div', null,
+                    i === 0 && h('div', { className: 'field-label', style: { marginBottom: 4 } }, 'Dose'),
+                    h('input', { type: 'text', value: line.dosage, placeholder: 'ex: 500mg', onChange: function(e) { setPrescLine(i, 'dosage', e.target.value); } })
+                  ),
+                  h('div', null,
+                    i === 0 && h('div', { className: 'field-label', style: { marginBottom: 4 } }, 'Frequencia'),
+                    h('input', { type: 'text', value: line.frequency, placeholder: 'ex: 8/8h', onChange: function(e) { setPrescLine(i, 'frequency', e.target.value); } })
+                  ),
+                  prescList.length > 1 && h('button', { onClick: function() { removePrescLine(i); }, style: { background: 'var(--accent-r-bg)', border: 'none', borderRadius: 6, padding: '9px 10px', cursor: 'pointer', color: 'var(--accent-r)', fontSize: 14, marginTop: i === 0 ? 18 : 0 } }, '\u00D7')
+                );
+              }),
+              h('button', { className: 'btn-secondary', style: { fontSize: 12, padding: '6px 12px', marginBottom: 20 }, onClick: addPrescLine }, '+ Adicionar Medicamento'),
+              h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 10 } },
+                h('button', { className: 'btn-secondary', onClick: function() { setShowPrescModal(false); } }, 'Cancelar'),
+                h('button', { className: 'btn-primary', onClick: handleSavePresc, disabled: savingPresc }, savingPresc ? 'Salvando...' : 'Salvar Prescricao')
+              )
+            )
+          )
+        ),
+
+        /* Painel Retorno */
+        activePanel === 'retorno' && h('div', { style: { padding: '16px 20px', display: 'flex', gap: 16, alignItems: 'flex-start' } },
+          h('div', null,
+            h('div', { className: 'field-label' }, 'Data de Retorno'),
+            h('input', { type: 'date', value: consulta.follow_up_date || '', onChange: function(e) { onChange('follow_up_date', e.target.value); }, onBlur: onSave, style: { width: 180 } })
+          ),
+          h('div', { style: { flex: 1 } },
+            h('div', { className: 'field-label' }, 'Instrucoes de Retorno'),
+            h('input', { type: 'text', value: consulta.follow_up_notes || '', placeholder: 'ex: Retornar em 30 dias com exames', onChange: function(e) { onChange('follow_up_notes', e.target.value); }, onBlur: onSave })
+          )
+        )
+      );
+    }
+
+    /* ---- App principal ---- */
+    function App() {
+      var [loading, setLoading]     = React.useState(true);
+      var [error, setError]         = React.useState(null);
+      var [patient, setPatient]     = React.useState(null);
+      var [consulta, setConsulta]   = React.useState(null);
+      var [vitals, setVitals]       = React.useState(null);
+      var [allergies, setAllergies] = React.useState([]);
+      var [saving, setSaving]       = React.useState(false);
+      var [saved, setSaved]         = React.useState(false);
+      var saveTimer = React.useRef(null);
+
+      var consultaId = params.consultaId;
+      var patientId  = params.patientId;
+
+      React.useEffect(function() {
+        if (!consultaId || !patientId) { setError('Parametros ausentes na URL. Use ?consulta=UUID&patient=UUID'); setLoading(false); return; }
+        initToken().then(function(token) {
+          if (!token) { window.location.href = '/crm/login.html'; return; }
+          return Promise.all([
+            q('/prontuario/consultation/' + consultaId),
+            q('/prontuario/patient/' + patientId + '/vitals?limit=1'),
+            q('/prontuario/patient/' + patientId + '/allergies')
+          ]);
+        }).then(function(results) {
+          if (!results) return;
+          var consultaData = results[0];
+          var vitalsData   = results[1];
+          var allergyData  = results[2];
+          if (!consultaData || !consultaData.id) { setError('Consulta nao encontrada'); return; }
+          setConsulta(consultaData);
+          setPatient(consultaData.patients || null);
+          setVitals(vitalsData && Array.isArray(vitalsData) && vitalsData[0] ? vitalsData[0] : null);
+          setAllergies(Array.isArray(allergyData) ? allergyData : []);
+        }).catch(function(e) {
+          setError('Erro ao carregar dados: ' + e.message);
+        }).finally(function() { setLoading(false); });
+      }, []);
+
+      function handleChange(field, value) {
+        setConsulta(function(prev) { var o = {}; o[field] = value; return Object.assign({}, prev, o); });
+        setSaved(false);
+      }
+
+      function handleSave() {
+        if (!consulta || !consultaId) return;
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(function() {
+          setSaving(true);
+          var payload = {
+            soap_subjective:  consulta.soap_subjective,
+            soap_objective:   consulta.soap_objective,
+            soap_assessment:  consulta.soap_assessment,
+            soap_plan:        consulta.soap_plan,
+            diagnosis_notes:  consulta.diagnosis_notes,
+            treatment_plan:   consulta.treatment_plan,
+            follow_up_date:   consulta.follow_up_date,
+            follow_up_notes:  consulta.follow_up_notes
+          };
+          q('/prontuario/consultation/' + consultaId, { method: 'PUT', body: JSON.stringify(payload) })
+            .then(function(r) { if (r && r.id) { setSaved(true); setTimeout(function() { setSaved(false); }, 2500); } })
+            .finally(function() { setSaving(false); });
+        }, 800);
+      }
+
+      function handleFinalize() {
+        if (!window.confirm('Finalizar esta consulta? O status sera alterado para "finalizada".')) return;
+        q('/prontuario/consultation/' + consultaId, { method: 'PUT', body: JSON.stringify({ status: 'finalizada' }) })
+          .then(function(r) { if (r && r.id) setConsulta(function(p) { return Object.assign({}, p, { status: 'finalizada' }); }); });
+      }
+
+      if (loading) return h(LoadingFull);
+      if (error)   return h(ErrorFull, { msg: error });
+      if (!consulta) return h(ErrorFull, { msg: 'Consulta nao encontrada' });
+
+      return h('div', { className: 'fi', style: { display: 'flex', flexDirection: 'column', height: '100vh' } },
+        h(Topbar, { patient: patient, consulta: consulta, saving: saving, saved: saved, onFinalize: handleFinalize }),
+        h('div', { style: { flex: 1, display: 'flex', overflow: 'hidden' } },
+          h(Sidebar, { patient: patient, consulta: consulta, vitals: vitals, allergies: allergies }),
+          h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' } },
+            h('div', { style: { flex: 1, overflow: 'hidden' } },
+              h(SOAPEditor, { consulta: consulta, onChange: handleChange, onSave: handleSave, saving: saving })
+            ),
+            h(PainelInferior, { consulta: consulta, onChange: handleChange, onSave: handleSave, patientId: patientId, consultaId: consultaId })
+          )
+        )
+      );
+    }
+
+    var root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(h(App));
+  </script>
+</body>
+</html>
