@@ -102,6 +102,20 @@ export default function createProntuarioRouter(supabase) {
     }
   });
 
+  // Rota alternativa: registrar vitais diretamente pelo patientId (sem consultation_id obrigatorio)
+  router.post('/patient/:patientId/vitals', async (req, res) => {
+    try {
+      const { patientId } = req.params;
+      const { clinicId, userId } = req;
+      const vitals = await addVitals(supabase, clinicId, patientId, null, req.body, userId);
+      logAudit(supabase, clinicId, patientId, userId, 'create', 'vitals', vitals.id);
+      return res.status(201).json(vitals);
+    } catch (err) {
+      console.error('[PRONTUARIO ROUTE] POST /patient/vitals:', err.message);
+      return res.status(500).json({ error: 'Erro ao registrar sinais vitais' });
+    }
+  });
+
   // SINAIS VITAIS
   router.post('/consultation/:id/vitals', async (req, res) => {
     try {

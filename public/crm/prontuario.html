@@ -26,6 +26,8 @@
       --accent-a-bg:#FEF3C7;
       --accent-b:   #2563EB;
       --accent-b-bg:#DBEAFE;
+      --accent-v:   #8B5CF6;
+      --accent-v-bg:#EDE9FE;
       --shadow:     0 4px 24px rgba(11,138,111,.07), 0 1px 3px rgba(0,0,0,.05);
       --shadow-sm:  0 2px 8px rgba(0,0,0,.06);
       --shadow-lg:  0 8px 40px rgba(11,138,111,.12);
@@ -689,6 +691,242 @@
       );
     }
 
+    /* ---- Tab Sinais Vitais com graficos Chart.js ---- */
+    function TabVitais({ patientId }) {
+      var [data, setData]           = React.useState([]);
+      var [loading, setLoading]     = React.useState(true);
+      var [showModal, setShowModal] = React.useState(false);
+      var [saving, setSaving]       = React.useState(false);
+      var [activeChart, setActiveChart] = React.useState("pa");
+      var [form, setForm] = React.useState({
+        blood_pressure_systolic: "", blood_pressure_diastolic: "",
+        heart_rate: "", temperature: "", oxygen_saturation: "",
+        weight_kg: "", height_cm: "", blood_glucose: "", notes: ""
+      });
+      var chartRef = React.useRef(null);
+      var chartInstance = React.useRef(null);
+
+      React.useEffect(function() {
+        q("/prontuario/patient/" + patientId + "/vitals?limit=30")
+          .then(function(r) { if (r && Array.isArray(r)) setData(r); })
+          .finally(function() { setLoading(false); });
+      }, [patientId]);
+
+      React.useEffect(function() {
+        if (!chartRef.current || data.length === 0) return;
+        if (chartInstance.current) { chartInstance.current.destroy(); chartInstance.current = null; }
+        var sorted = data.slice().reverse();
+        var labels = sorted.map(function(v) { return fmtDate(v.measured_at); });
+        var ctx = chartRef.current.getContext("2d");
+        var datasets = [];
+        if (activeChart === "pa") {
+          datasets = [
+            { label: "Sistolica (mmHg)", data: sorted.map(function(v) { return v.blood_pressure_systolic || null; }), borderColor: "#EF4444", backgroundColor: "rgba(239,68,68,.08)", tension: 0.35, pointRadius: 4, pointHoverRadius: 6, fill: false },
+            { label: "Diastolica (mmHg)", data: sorted.map(function(v) { return v.blood_pressure_diastolic || null; }), borderColor: "#0B8A6F", backgroundColor: "rgba(11,138,111,.08)", tension: 0.35, pointRadius: 4, pointHoverRadius: 6, fill: false }
+          ];
+        } else if (activeChart === "peso") {
+          datasets = [
+            { label: "Peso (kg)", data: sorted.map(function(v) { return v.weight_kg || null; }), borderColor: "#2563EB", backgroundColor: "rgba(37,99,235,.08)", tension: 0.35, pointRadius: 4, fill: true }
+          ];
+        } else if (activeChart === "fc") {
+          datasets = [
+            { label: "Freq. Cardiaca (bpm)", data: sorted.map(function(v) { return v.heart_rate || null; }), borderColor: "#D97706", backgroundColor: "rgba(217,119,6,.08)", tension: 0.35, pointRadius: 4, fill: false }
+          ];
+        } else if (activeChart === "glicemia") {
+          datasets = [
+            { label: "Glicemia (mg/dL)", data: sorted.map(function(v) { return v.blood_glucose || null; }), borderColor: "#8B5CF6", backgroundColor: "rgba(139,92,246,.08)", tension: 0.35, pointRadius: 4, fill: false }
+          ];
+        }
+        chartInstance.current = new Chart(ctx, {
+          type: "line",
+          data: { labels: labels, datasets: datasets },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: { duration: 500, easing: "easeOutQuart" },
+            plugins: {
+              legend: { position: "bottom", labels: { color: "#475569", font: { family: "Inter", size: 11 }, usePointStyle: true, padding: 16 } },
+              tooltip: { backgroundColor: "#fff", borderColor: "rgba(11,138,111,.2)", borderWidth: 1, titleColor: "#0F172A", bodyColor: "#475569", padding: 12, cornerRadius: 10, boxShadow: "0 4px 12px rgba(0,0,0,.1)" }
+            },
+            scales: {
+              x: { grid: { color: "rgba(11,138,111,.06)" }, ticks: { color: "#94A3B8", font: { family: "Inter", size: 11 } }, border: { display: false } },
+              y: { grid: { color: "rgba(11,138,111,.06)" }, ticks: { color: "#94A3B8", font: { family: "Inter", size: 11 } }, border: { display: false }, beginAtZero: false }
+            }
+          }
+        });
+        return function() { if (chartInstance.current) { chartInstance.current.destroy(); chartInstance.current = null; } };
+      }, [data, activeChart]);
+
+      function setF(k, v) { setForm(function(p) { var o = {}; o[k] = v; return Object.assign({}, p, o); }); }
+
+      function handleSave() {
+        var payload = { patient_id: patientId };
+        if (form.blood_pressure_systolic) payload.blood_pressure_systolic = parseInt(form.blood_pressure_systolic);
+        if (form.blood_pressure_diastolic) payload.blood_pressure_diastolic = parseInt(form.blood_pressure_diastolic);
+        if (form.heart_rate) payload.heart_rate = parseInt(form.heart_rate);
+        if (form.temperature) payload.temperature = parseFloat(form.temperature);
+        if (form.oxygen_saturation) payload.oxygen_saturation = parseFloat(form.oxygen_saturation);
+        if (form.weight_kg) payload.weight_kg = parseFloat(form.weight_kg);
+        if (form.height_cm) payload.height_cm = parseFloat(form.height_cm);
+        if (form.blood_glucose) payload.blood_glucose = parseInt(form.blood_glucose);
+        if (form.notes) payload.notes = form.notes;
+        setSaving(true);
+        q("/prontuario/patient/" + patientId + "/vitals", { method: "POST", body: JSON.stringify(payload) })
+          .then(function(r) {
+            if (r && r.id) {
+              setData(function(p) { return [r].concat(p); });
+              setShowModal(false);
+              setForm({ blood_pressure_systolic: "", blood_pressure_diastolic: "", heart_rate: "", temperature: "", oxygen_saturation: "", weight_kg: "", height_cm: "", blood_glucose: "", notes: "" });
+            }
+          }).finally(function() { setSaving(false); });
+      }
+
+      function paClass(s, d) {
+        if (!s || !d) return null;
+        if (s < 120 && d < 80) return { label: "Normal", color: "var(--accent)", bg: "var(--accent-bg)" };
+        if (s < 130 && d < 80) return { label: "Elevada", color: "var(--accent-a)", bg: "var(--accent-a-bg)" };
+        if (s < 140 || d < 90) return { label: "Hipertensao Est. 1", color: "var(--accent-a)", bg: "var(--accent-a-bg)" };
+        return { label: "Hipertensao Est. 2", color: "var(--accent-r)", bg: "var(--accent-r-bg)" };
+      }
+
+      function bmiClass(bmi) {
+        if (!bmi) return null;
+        if (bmi < 18.5) return { label: "Abaixo do peso", color: "var(--accent-b)", bg: "var(--accent-b-bg)" };
+        if (bmi < 25)   return { label: "Normal", color: "var(--accent)", bg: "var(--accent-bg)" };
+        if (bmi < 30)   return { label: "Sobrepeso", color: "var(--accent-a)", bg: "var(--accent-a-bg)" };
+        return { label: "Obesidade", color: "var(--accent-r)", bg: "var(--accent-r-bg)" };
+      }
+
+      var latest = data[0] || null;
+      var chartTabs = [
+        { id: "pa",       label: "Pressao Arterial" },
+        { id: "fc",       label: "Freq. Cardiaca" },
+        { id: "peso",     label: "Peso" },
+        { id: "glicemia", label: "Glicemia" }
+      ];
+
+      return h("div", { className: "fi", style: { display: "flex", flexDirection: "column", gap: 16 } },
+
+        /* Header */
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--t1)", margin: 0 } }, "Sinais Vitais (" + data.length + " medicoes)"),
+          h(BtnPrimary, { label: "+ Registrar Medicao", onClick: function() { setShowModal(true); } })
+        ),
+
+        /* Cards do ultimo registro */
+        latest && h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 } },
+          [
+            latest.blood_pressure_systolic && (function() {
+              var cls = paClass(latest.blood_pressure_systolic, latest.blood_pressure_diastolic);
+              return h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "14px 16px", boxShadow: "var(--shadow-sm)" } },
+                h("div", { style: { fontSize: 11, color: "var(--t3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, "Pressao Arterial"),
+                h("div", { style: { fontSize: 22, fontWeight: 700, color: "var(--accent-r)", fontFamily: "JetBrains Mono" } }, latest.blood_pressure_systolic + "/" + latest.blood_pressure_diastolic),
+                h("div", { style: { fontSize: 10, color: "var(--t3)" } }, "mmHg"),
+                cls && h("span", { style: { fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 9999, background: cls.bg, color: cls.color, marginTop: 6, display: "inline-block" } }, cls.label)
+              );
+            })(),
+            latest.heart_rate && h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "14px 16px", boxShadow: "var(--shadow-sm)" } },
+              h("div", { style: { fontSize: 11, color: "var(--t3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, "Freq. Cardiaca"),
+              h("div", { style: { fontSize: 22, fontWeight: 700, color: "var(--accent-a)", fontFamily: "JetBrains Mono" } }, latest.heart_rate),
+              h("div", { style: { fontSize: 10, color: "var(--t3)" } }, "bpm")
+            ),
+            latest.temperature && h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "14px 16px", boxShadow: "var(--shadow-sm)" } },
+              h("div", { style: { fontSize: 11, color: "var(--t3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, "Temperatura"),
+              h("div", { style: { fontSize: 22, fontWeight: 700, color: "var(--t1)", fontFamily: "JetBrains Mono" } }, latest.temperature),
+              h("div", { style: { fontSize: 10, color: "var(--t3)" } }, "oC")
+            ),
+            latest.oxygen_saturation && h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "14px 16px", boxShadow: "var(--shadow-sm)" } },
+              h("div", { style: { fontSize: 11, color: "var(--t3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, "SpO2"),
+              h("div", { style: { fontSize: 22, fontWeight: 700, color: "var(--accent)", fontFamily: "JetBrains Mono" } }, latest.oxygen_saturation),
+              h("div", { style: { fontSize: 10, color: "var(--t3)" } }, "%")
+            ),
+            latest.bmi && (function() {
+              var cls = bmiClass(parseFloat(latest.bmi));
+              return h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "14px 16px", boxShadow: "var(--shadow-sm)" } },
+                h("div", { style: { fontSize: 11, color: "var(--t3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, "IMC"),
+                h("div", { style: { fontSize: 22, fontWeight: 700, color: cls ? cls.color : "var(--t1)", fontFamily: "JetBrains Mono" } }, latest.bmi),
+                h("div", { style: { fontSize: 10, color: "var(--t3)" } }, "kg/m2"),
+                cls && h("span", { style: { fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 9999, background: cls.bg, color: cls.color, marginTop: 6, display: "inline-block" } }, cls.label)
+              );
+            })(),
+            latest.blood_glucose && h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "14px 16px", boxShadow: "var(--shadow-sm)" } },
+              h("div", { style: { fontSize: 11, color: "var(--t3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, "Glicemia"),
+              h("div", { style: { fontSize: 22, fontWeight: 700, color: "var(--accent-v)", fontFamily: "JetBrains Mono" } }, latest.blood_glucose),
+              h("div", { style: { fontSize: 10, color: "var(--t3)" } }, "mg/dL")
+            )
+          ].filter(Boolean)
+        ),
+
+        /* Grafico de evolucao */
+        loading ? h(LoadingSkel) :
+        data.length < 2 ? h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-lg)", padding: "32px", textAlign: "center", color: "var(--t3)" } },
+          h("div", { style: { fontSize: 28, marginBottom: 8 } }, "\uD83D\uDCC8"),
+          h("div", { style: { fontSize: 14 } }, "Registre ao menos 2 medicoes para visualizar a evolucao grafica")
+        ) :
+        h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-lg)", padding: "20px 24px", boxShadow: "var(--shadow-sm)" } },
+          h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
+            h("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, "Evolucao Temporal"),
+            h("div", { style: { display: "flex", gap: 4 } },
+              chartTabs.map(function(ct) {
+                var isA = activeChart === ct.id;
+                return h("button", { key: ct.id, onClick: function() { setActiveChart(ct.id); },
+                  style: { padding: "5px 12px", fontSize: 11, fontWeight: 600, borderRadius: "var(--radius-sm)", border: "1px solid " + (isA ? "var(--accent)" : "var(--bdr)"), background: isA ? "var(--accent-bg)" : "transparent", color: isA ? "var(--accent)" : "var(--t3)", cursor: "pointer", transition: "all 150ms", fontFamily: "Inter" }
+                }, ct.label);
+              })
+            )
+          ),
+          h("div", { style: { height: 220, position: "relative" } },
+            h("canvas", { ref: chartRef, id: "pr-vitais-chart" })
+          )
+        ),
+
+        /* Tabela historica */
+        !loading && data.length > 0 && h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-lg)", overflow: "hidden", boxShadow: "var(--shadow-sm)" } },
+          h("div", { style: { padding: "16px 20px", borderBottom: "1px solid var(--bdr)", fontSize: 13, fontWeight: 600, color: "var(--t1)" } }, "Historico de Medicoes"),
+          h("div", { style: { overflowX: "auto" } },
+            h("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12 } },
+              h("thead", null,
+                h("tr", null,
+                  ["Data", "PA (mmHg)", "FC (bpm)", "Temp (oC)", "SpO2 (%)", "Peso (kg)", "IMC", "Glicemia"].map(function(col) {
+                    return h("th", { key: col, style: { padding: "10px 14px", textAlign: "left", color: "var(--t3)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: ".06em", borderBottom: "1px solid var(--bdr)", whiteSpace: "nowrap", background: "#F8FDFB" } }, col);
+                  })
+                )
+              ),
+              h("tbody", null,
+                data.map(function(v) {
+                  return h("tr", { key: v.id, style: { borderBottom: "1px solid var(--bdr)" } },
+                    h("td", { style: { padding: "10px 14px", color: "var(--t2)", fontFamily: "JetBrains Mono", fontSize: 11 } }, fmtDate(v.measured_at)),
+                    h("td", { style: { padding: "10px 14px", fontFamily: "JetBrains Mono", fontWeight: 600, color: v.blood_pressure_systolic ? "var(--accent-r)" : "var(--t3)" } }, v.blood_pressure_systolic ? v.blood_pressure_systolic + "/" + v.blood_pressure_diastolic : "--"),
+                    h("td", { style: { padding: "10px 14px", fontFamily: "JetBrains Mono", color: "var(--t1)" } }, v.heart_rate || "--"),
+                    h("td", { style: { padding: "10px 14px", fontFamily: "JetBrains Mono", color: "var(--t1)" } }, v.temperature || "--"),
+                    h("td", { style: { padding: "10px 14px", fontFamily: "JetBrains Mono", color: "var(--t1)" } }, v.oxygen_saturation || "--"),
+                    h("td", { style: { padding: "10px 14px", fontFamily: "JetBrains Mono", color: "var(--t1)" } }, v.weight_kg || "--"),
+                    h("td", { style: { padding: "10px 14px", fontFamily: "JetBrains Mono", fontWeight: 600, color: v.bmi ? "var(--accent)" : "var(--t3)" } }, v.bmi || "--"),
+                    h("td", { style: { padding: "10px 14px", fontFamily: "JetBrains Mono", color: "var(--t1)" } }, v.blood_glucose || "--")
+                  );
+                })
+              )
+            )
+          )
+        ),
+
+        /* Modal nova medicao */
+        showModal && h(Modal, { title: "Registrar Sinais Vitais", onClose: function() { setShowModal(false); } },
+          h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+            h(FormField, { label: "PA Sistolica (mmHg)" }, h("input", { type: "number", value: form.blood_pressure_systolic, onChange: function(e) { setF("blood_pressure_systolic", e.target.value); }, placeholder: "ex: 120", style: iSt() })),
+            h(FormField, { label: "PA Diastolica (mmHg)" }, h("input", { type: "number", value: form.blood_pressure_diastolic, onChange: function(e) { setF("blood_pressure_diastolic", e.target.value); }, placeholder: "ex: 80", style: iSt() })),
+            h(FormField, { label: "Freq. Cardiaca (bpm)" }, h("input", { type: "number", value: form.heart_rate, onChange: function(e) { setF("heart_rate", e.target.value); }, placeholder: "ex: 72", style: iSt() })),
+            h(FormField, { label: "Temperatura (oC)" }, h("input", { type: "number", step: "0.1", value: form.temperature, onChange: function(e) { setF("temperature", e.target.value); }, placeholder: "ex: 36.5", style: iSt() })),
+            h(FormField, { label: "SpO2 (%)" }, h("input", { type: "number", value: form.oxygen_saturation, onChange: function(e) { setF("oxygen_saturation", e.target.value); }, placeholder: "ex: 98", style: iSt() })),
+            h(FormField, { label: "Glicemia (mg/dL)" }, h("input", { type: "number", value: form.blood_glucose, onChange: function(e) { setF("blood_glucose", e.target.value); }, placeholder: "ex: 95", style: iSt() })),
+            h(FormField, { label: "Peso (kg)" }, h("input", { type: "number", step: "0.1", value: form.weight_kg, onChange: function(e) { setF("weight_kg", e.target.value); }, placeholder: "ex: 70.5", style: iSt() })),
+            h(FormField, { label: "Altura (cm)" }, h("input", { type: "number", value: form.height_cm, onChange: function(e) { setF("height_cm", e.target.value); }, placeholder: "ex: 170", style: iSt() }))
+          ),
+          h(FormField, { label: "Observacoes" }, h("textarea", { value: form.notes, onChange: function(e) { setF("notes", e.target.value); }, rows: 2, placeholder: "Observacoes clinicas...", style: iSt({ resize: "vertical" }) })),
+          h(ModalFooter, { onClose: function() { setShowModal(false); }, onSave: handleSave, saving: saving, saveLabel: "Registrar" })
+        )
+      );
+    }
+
     /* ---- Tab Exames ---- */
     function TabExames({ patientId }) {
       var [data, setData]           = React.useState([]);
@@ -817,6 +1055,7 @@
       var tabs = [
         { id: "resumo",     label: "Resumo" },
         { id: "consultas",  label: "Consultas" },
+        { id: "vitais",     label: "Sinais Vitais" },
         { id: "historico",  label: "Historico" },
         { id: "exames",     label: "Exames" },
         { id: "documentos", label: "Documentos" }
@@ -831,6 +1070,7 @@
         h("div", { style: { flex: 1, overflowY: "auto", padding: 24 } },
           activeTab === "resumo"     && h(TabResumo,     { summary: summary }),
           activeTab === "consultas"  && h(TabConsultas,  { patientId: patientId }),
+          activeTab === "vitais"     && h(TabVitais,     { patientId: patientId }),
           activeTab === "historico"  && h(TabHistorico,  { patientId: patientId }),
           activeTab === "exames"     && h(TabExames,     { patientId: patientId }),
           activeTab === "documentos" && h(TabDocumentos, { patientId: patientId })
