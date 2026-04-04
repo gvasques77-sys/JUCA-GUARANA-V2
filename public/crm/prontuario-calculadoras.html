@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calculadoras Clinicas — CLINICORE</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #EFF6F3; --bg2: #FFFFFF; --card: #FFFFFF;
+      --bdr: rgba(11,138,111,.10); --bdr-h: rgba(11,138,111,.22);
+      --t1: #0F172A; --t2: #475569; --t3: #94A3B8;
+      --accent: #0B8A6F; --accent-l: #10B981; --accent-bg: #D1FAE5;
+      --accent-r: #EF4444; --accent-r-bg: #FEE2E2;
+      --accent-a: #D97706; --accent-a-bg: #FEF3C7;
+      --accent-b: #2563EB; --accent-b-bg: #DBEAFE;
+      --shadow-sm: 0 2px 8px rgba(0,0,0,.06);
+      --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px;
+      --ease-out: cubic-bezier(0.16,1,0.3,1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--t1); min-height: 100vh; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: var(--bdr-h); border-radius: 3px; }
+    input, select { font-family: Inter; font-size: 14px; color: var(--t1); background: #fff; border: 1px solid var(--bdr); border-radius: var(--radius-sm); padding: 10px 14px; width: 100%; outline: none; transition: border 150ms; }
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(11,138,111,.08); }
+    label { display: block; font-size: 11px; font-weight: 700; color: var(--t3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    button { font-family: Inter; cursor: pointer; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .fi { animation: fadeIn 280ms var(--ease-out) both; }
+    .calc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 20px; padding: 24px; max-width: 1300px; margin: 0 auto; }
+    .calc-card { background: #fff; border: 1px solid var(--bdr); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-sm); }
+    .calc-title { font-size: 15px; font-weight: 700; color: var(--t1); margin-bottom: 4px; }
+    .calc-desc { font-size: 12px; color: var(--t3); margin-bottom: 18px; }
+    .calc-fields { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+    .calc-result { background: var(--bg); border: 1px solid var(--bdr); border-radius: var(--radius-md); padding: 16px; display: none; }
+    .calc-result.show { display: block; }
+    .result-value { font-size: 32px; font-weight: 700; font-family: 'JetBrains Mono'; letter-spacing: -.02em; color: var(--accent); }
+    .result-label { font-size: 12px; color: var(--t3); margin-top: 2px; }
+    .result-detail { font-size: 13px; color: var(--t2); margin-top: 10px; line-height: 1.6; }
+    .topbar { height: 60px; background: #fff; border-bottom: 1px solid var(--bdr); display: flex; align-items: center; padding: 0 24px; gap: 16px; box-shadow: 0 1px 0 var(--bdr); position: sticky; top: 0; z-index: 10; }
+    .section-title { font-size: 13px; font-weight: 700; color: var(--t3); text-transform: uppercase; letter-spacing: .08em; padding: 20px 24px 0; max-width: 1300px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <button onclick="window.history.back()" style="background:none;border:1px solid var(--bdr);border-radius:8px;padding:6px 14px;font-size:13px;font-weight:500;color:var(--t2);">&larr; Voltar</button>
+    <div style="width:1px;height:24px;background:var(--bdr);"></div>
+    <span style="font-size:13px;font-weight:600;color:var(--accent);">CLINICORE</span>
+    <div style="flex:1;"></div>
+    <span style="font-size:15px;font-weight:700;color:var(--t1);">&#129518; Calculadoras Clinicas</span>
+    <div style="flex:1;"></div>
+  </div>
+
+  <div style="padding-bottom:40px;">
+
+    <div class="section-title" style="padding-top:24px;">COMPOSICAO CORPORAL</div>
+    <div class="calc-grid fi">
+
+      <!-- CALCULADORA IMC -->
+      <div class="calc-card">
+        <div class="calc-title">IMC &mdash; Indice de Massa Corporal</div>
+        <div class="calc-desc">Classificacao da OMS para adultos &ge; 18 anos</div>
+        <div class="calc-fields">
+          <div><label>Peso (kg)</label><input type="number" id="imc-peso" step="0.1" placeholder="ex: 70.5" oninput="calcIMC()"></div>
+          <div><label>Altura (cm)</label><input type="number" id="imc-altura" step="1" placeholder="ex: 170" oninput="calcIMC()"></div>
+        </div>
+        <div class="calc-result" id="imc-result">
+          <div class="result-value" id="imc-val">--</div>
+          <div class="result-label">kg/m&sup2;</div>
+          <div id="imc-class"></div>
+          <div class="result-detail" id="imc-detail"></div>
+        </div>
+      </div>
+
+      <!-- PESO IDEAL + SUPERFICIE CORPORAL -->
+      <div class="calc-card">
+        <div class="calc-title">Peso Ideal + Superficie Corporal</div>
+        <div class="calc-desc">Devine (peso ideal) + Mosteller (SC)</div>
+        <div class="calc-fields">
+          <div><label>Sexo</label>
+            <select id="pi-sexo" onchange="calcPesoIdeal()">
+              <option value="M">Masculino</option>
+              <option value="F">Feminino</option>
+            </select>
+          </div>
+          <div><label>Altura (cm)</label><input type="number" id="pi-altura" step="1" placeholder="ex: 170" oninput="calcPesoIdeal()"></div>
+          <div><label>Peso atual (kg) &mdash; para SC</label><input type="number" id="pi-peso" step="0.1" placeholder="ex: 70.5" oninput="calcPesoIdeal()"></div>
+        </div>
+        <div class="calc-result" id="pi-result">
+          <div class="result-value" id="pi-val">--</div>
+          <div class="result-label" id="pi-label">kg (peso ideal)</div>
+          <div class="result-detail" id="pi-detail"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="section-title">FUNCAO RENAL</div>
+    <div class="calc-grid fi" style="animation-delay:60ms;">
+
+      <!-- CLEARANCE DE CREATININA — COCKCROFT-GAULT -->
+      <div class="calc-card">
+        <div class="calc-title">Clearance de Creatinina</div>
+        <div class="calc-desc">Formula de Cockcroft-Gault</div>
+        <div class="calc-fields">
+          <div><label>Idade (anos)</label><input type="number" id="cc-idade" placeholder="ex: 55" oninput="calcCC()"></div>
+          <div><label>Sexo</label>
+            <select id="cc-sexo" onchange="calcCC()">
+              <option value="M">Masculino</option>
+              <option value="F">Feminino</option>
+            </select>
+          </div>
+          <div><label>Peso (kg)</label><input type="number" id="cc-peso" step="0.1" placeholder="ex: 70" oninput="calcCC()"></div>
+          <div><label>Creatinina serica (mg/dL)</label><input type="number" id="cc-creat" step="0.01" placeholder="ex: 1.1" oninput="calcCC()"></div>
+        </div>
+        <div class="calc-result" id="cc-result">
+          <div class="result-value" id="cc-val">--</div>
+          <div class="result-label">mL/min</div>
+          <div id="cc-class"></div>
+          <div class="result-detail" id="cc-detail"></div>
+        </div>
+      </div>
+
+      <!-- TFG — CKD-EPI -->
+      <div class="calc-card">
+        <div class="calc-title">TFG &mdash; Taxa de Filtracao Glomerular</div>
+        <div class="calc-desc">Equacao CKD-EPI 2021 (sem raca)</div>
+        <div class="calc-fields">
+          <div><label>Sexo</label>
+            <select id="tfg-sexo" onchange="calcTFG()">
+              <option value="M">Masculino</option>
+              <option value="F">Feminino</option>
+            </select>
+          </div>
+          <div><label>Idade (anos)</label><input type="number" id="tfg-idade" placeholder="ex: 55" oninput="calcTFG()"></div>
+          <div><label>Creatinina serica (mg/dL)</label><input type="number" id="tfg-creat" step="0.01" placeholder="ex: 1.1" oninput="calcTFG()"></div>
+        </div>
+        <div class="calc-result" id="tfg-result">
+          <div class="result-value" id="tfg-val">--</div>
+          <div class="result-label">mL/min/1,73m&sup2;</div>
+          <div id="tfg-class"></div>
+          <div class="result-detail" id="tfg-detail"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="section-title">PEDIATRIA + DOSAGEM</div>
+    <div class="calc-grid fi" style="animation-delay:120ms;">
+
+      <!-- DOSE POR PESO -->
+      <div class="calc-card">
+        <div class="calc-title">Dose por Peso</div>
+        <div class="calc-desc">Calculo de dose medicamentosa por kg</div>
+        <div class="calc-fields">
+          <div><label>Peso do paciente (kg)</label><input type="number" id="dp-peso" step="0.1" placeholder="ex: 25" oninput="calcDose()"></div>
+          <div><label>Dose prescrita (mg/kg/dose)</label><input type="number" id="dp-dose" step="0.01" placeholder="ex: 10" oninput="calcDose()"></div>
+          <div><label>Concentracao disponivel (mg/mL) &mdash; opcional</label><input type="number" id="dp-conc" step="0.01" placeholder="ex: 50" oninput="calcDose()"></div>
+        </div>
+        <div class="calc-result" id="dp-result">
+          <div class="result-value" id="dp-val">--</div>
+          <div class="result-label">mg por dose</div>
+          <div class="result-detail" id="dp-detail"></div>
+        </div>
+      </div>
+
+      <!-- HIDRATACAO VENOSA PEDIATRICA -->
+      <div class="calc-card">
+        <div class="calc-title">Hidratacao Venosa</div>
+        <div class="calc-desc">Holliday-Segar &mdash; necessidade hidrica diaria</div>
+        <div class="calc-fields">
+          <div><label>Peso (kg)</label><input type="number" id="hv-peso" step="0.1" placeholder="ex: 25" oninput="calcHV()"></div>
+        </div>
+        <div class="calc-result" id="hv-result">
+          <div class="result-value" id="hv-val">--</div>
+          <div class="result-label">mL/dia</div>
+          <div class="result-detail" id="hv-detail"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="section-title">CARDIOVASCULAR</div>
+    <div class="calc-grid fi" style="animation-delay:180ms;">
+
+      <!-- RISCO CARDIOVASCULAR -->
+      <div class="calc-card">
+        <div class="calc-title">Escore de Risco Cardiovascular</div>
+        <div class="calc-desc">Baseado em fatores de risco clinicos (orientativo)</div>
+        <div class="calc-fields">
+          <div><label>Idade (anos)</label><input type="number" id="rc-idade" placeholder="ex: 55" oninput="calcRC()"></div>
+          <div><label>Sexo</label>
+            <select id="rc-sexo" onchange="calcRC()">
+              <option value="M">Masculino</option>
+              <option value="F">Feminino</option>
+            </select>
+          </div>
+          <div><label>Pressao Sistolica (mmHg)</label><input type="number" id="rc-pas" placeholder="ex: 140" oninput="calcRC()"></div>
+          <div><label>Colesterol Total (mg/dL)</label><input type="number" id="rc-col" placeholder="ex: 210" oninput="calcRC()"></div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--t2);font-weight:500;margin-bottom:0;">
+              <input type="checkbox" id="rc-tabaco" onchange="calcRC()" style="width:auto;padding:0;"> Tabagista
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--t2);font-weight:500;margin-bottom:0;">
+              <input type="checkbox" id="rc-dm" onchange="calcRC()" style="width:auto;padding:0;"> Diabetes
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--t2);font-weight:500;margin-bottom:0;">
+              <input type="checkbox" id="rc-hf" onchange="calcRC()" style="width:auto;padding:0;"> Hist. Familiar
+            </label>
+          </div>
+        </div>
+        <div class="calc-result" id="rc-result">
+          <div class="result-value" id="rc-val">--</div>
+          <div class="result-label">pontos de risco</div>
+          <div id="rc-class"></div>
+          <div class="result-detail" id="rc-detail"></div>
+        </div>
+      </div>
+
+      <!-- PRESSAO DE PULSO E PAM -->
+      <div class="calc-card">
+        <div class="calc-title">Pressao de Pulso + PAM</div>
+        <div class="calc-desc">Pressao de pulso e Pressao Arterial Media</div>
+        <div class="calc-fields">
+          <div><label>PA Sistolica (mmHg)</label><input type="number" id="pam-sis" placeholder="ex: 120" oninput="calcPAM()"></div>
+          <div><label>PA Diastolica (mmHg)</label><input type="number" id="pam-dia" placeholder="ex: 80" oninput="calcPAM()"></div>
+        </div>
+        <div class="calc-result" id="pam-result">
+          <div class="result-value" id="pam-val">--</div>
+          <div class="result-label" id="pam-label">mmHg (PAM)</div>
+          <div id="pam-class"></div>
+          <div class="result-detail" id="pam-detail"></div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    function v(id) { return parseFloat(document.getElementById(id).value) || 0; }
+    function sv(id) { return document.getElementById(id).value; }
+    function cv(id) { return document.getElementById(id).checked; }
+    function showResult(id, show) {
+      document.getElementById(id).className = 'calc-result' + (show ? ' show' : '');
+    }
+    function set(id, val) { var el = document.getElementById(id); if (el) el.innerHTML = val; }
+    function badge(label, bg, color) {
+      return '<span style="background:' + bg + ';color:' + color + ';padding:4px 12px;border-radius:9999px;font-size:12px;font-weight:600;display:inline-block;margin-top:10px;">' + label + '</span>';
+    }
+
+    /* ---- IMC ---- */
+    function calcIMC() {
+      var peso = v('imc-peso'), alt = v('imc-altura');
+      if (!peso || !alt) { showResult('imc-result', false); return; }
+      var h = alt / 100;
+      var imc = peso / (h * h);
+      set('imc-val', imc.toFixed(1));
+      var cls, bg, color, detail;
+      if (imc < 16)        { cls = 'Magreza Grau III'; bg = '#FEE2E2'; color = '#EF4444'; detail = 'Risco muito elevado. Avaliacao nutricional urgente.'; }
+      else if (imc < 17)   { cls = 'Magreza Grau II';  bg = '#FEE2E2'; color = '#EF4444'; detail = 'Baixo peso moderado. Acompanhamento nutricional indicado.'; }
+      else if (imc < 18.5) { cls = 'Magreza Grau I';   bg = '#FEF3C7'; color = '#D97706'; detail = 'Abaixo do peso ideal. Avaliar ingestao calorica.'; }
+      else if (imc < 25)   { cls = 'Peso Normal';       bg = '#D1FAE5'; color = '#0B8A6F'; detail = 'Faixa de peso saudavel para adultos.'; }
+      else if (imc < 30)   { cls = 'Sobrepeso';         bg = '#FEF3C7'; color = '#D97706'; detail = 'Risco aumentado. Mudanca de habitos recomendada.'; }
+      else if (imc < 35)   { cls = 'Obesidade Grau I';  bg = '#FEE2E2'; color = '#EF4444'; detail = 'Risco moderado. Intervencao terapeutica indicada.'; }
+      else if (imc < 40)   { cls = 'Obesidade Grau II'; bg = '#FEE2E2'; color = '#EF4444'; detail = 'Risco alto. Considerar suporte especializado.'; }
+      else                 { cls = 'Obesidade Grau III'; bg = '#FEE2E2'; color = '#991B1B'; detail = 'Risco muito alto. Abordagem multidisciplinar necessaria.'; }
+      set('imc-class', badge(cls, bg, color));
+      set('imc-detail', detail);
+      showResult('imc-result', true);
+    }
+
+    /* ---- Peso Ideal + SC ---- */
+    function calcPesoIdeal() {
+      var alt = v('pi-altura'), sexo = sv('pi-sexo'), peso = v('pi-peso');
+      if (!alt) { showResult('pi-result', false); return; }
+      var pi = sexo === 'M' ? 50 + 2.3 * ((alt - 152.4) / 2.54) : 45.5 + 2.3 * ((alt - 152.4) / 2.54);
+      pi = Math.max(pi, 30);
+      set('pi-val', pi.toFixed(1));
+      set('pi-label', 'kg (peso ideal &mdash; Devine)');
+      var detail = '';
+      if (peso) {
+        var sc = Math.sqrt((alt * peso) / 3600);
+        detail = 'Superficie Corporal (Mosteller): <strong>' + sc.toFixed(2) + ' m&sup2;</strong><br>';
+        var dif = ((peso - pi) / pi * 100).toFixed(1);
+        detail += 'Diferenca do peso atual: ' + (dif > 0 ? '+' : '') + dif + '%';
+      }
+      set('pi-detail', detail);
+      showResult('pi-result', true);
+    }
+
+    /* ---- Clearance Creatinina ---- */
+    function calcCC() {
+      var idade = v('cc-idade'), peso = v('cc-peso'), creat = v('cc-creat'), sexo = sv('cc-sexo');
+      if (!idade || !peso || !creat) { showResult('cc-result', false); return; }
+      var cc = ((140 - idade) * peso) / (72 * creat);
+      if (sexo === 'F') cc *= 0.85;
+      set('cc-val', cc.toFixed(0));
+      var cls, bg, color, detail;
+      if (cc >= 90)      { cls = 'Normal &ge; 90';           bg = '#D1FAE5'; color = '#0B8A6F'; detail = 'Funcao renal normal.'; }
+      else if (cc >= 60) { cls = 'Reducao leve (60-89)';     bg = '#FEF3C7'; color = '#D97706'; detail = 'Monitorar funcao renal. Ajustar doses renais se necessario.'; }
+      else if (cc >= 30) { cls = 'Reducao moderada (30-59)'; bg = '#FEE2E2'; color = '#EF4444'; detail = 'DRC moderada. Ajuste de doses obrigatorio para varios farmacos.'; }
+      else if (cc >= 15) { cls = 'Reducao grave (15-29)';    bg = '#FEE2E2'; color = '#991B1B'; detail = 'DRC grave. Encaminhamento para nefrologia.'; }
+      else               { cls = 'Falencia renal (&lt; 15)'; bg = '#FEE2E2'; color = '#991B1B'; detail = 'Falencia renal. Considerar terapia renal substitutiva.'; }
+      set('cc-class', badge(cls, bg, color));
+      set('cc-detail', detail);
+      showResult('cc-result', true);
+    }
+
+    /* ---- TFG CKD-EPI ---- */
+    function calcTFG() {
+      var sexo = sv('tfg-sexo'), idade = v('tfg-idade'), creat = v('tfg-creat');
+      if (!idade || !creat) { showResult('tfg-result', false); return; }
+      var kappa = sexo === 'F' ? 0.7 : 0.9;
+      var alpha = sexo === 'F' ? -0.241 : -0.302;
+      var ratio = creat / kappa;
+      var tfg = 142 * Math.pow(Math.min(ratio, 1), alpha) * Math.pow(Math.max(ratio, 1), -1.200) * Math.pow(0.9938, idade);
+      if (sexo === 'F') tfg *= 1.012;
+      set('tfg-val', tfg.toFixed(0));
+      var cls, bg, color, detail;
+      if (tfg >= 90)      { cls = 'G1 &mdash; Normal/alta';     bg = '#D1FAE5'; color = '#0B8A6F'; detail = 'Funcao glomerular normal.'; }
+      else if (tfg >= 60) { cls = 'G2 &mdash; Leve reducao';    bg = '#D1FAE5'; color = '#0B8A6F'; detail = 'Leve reducao. Monitorar anualmente.'; }
+      else if (tfg >= 45) { cls = 'G3a &mdash; Leve-moderada';  bg = '#FEF3C7'; color = '#D97706'; detail = 'Acompanhamento semestral recomendado.'; }
+      else if (tfg >= 30) { cls = 'G3b &mdash; Moderada-grave'; bg = '#FEE2E2'; color = '#EF4444'; detail = 'Encaminhar para nefrologia. Ajuste de medicamentos.'; }
+      else if (tfg >= 15) { cls = 'G4 &mdash; Grave';           bg = '#FEE2E2'; color = '#991B1B'; detail = 'Preparar para terapia renal substitutiva.'; }
+      else                { cls = 'G5 &mdash; Falencia renal';  bg = '#FEE2E2'; color = '#991B1B'; detail = 'Dialise ou transplante. Manejo especializado.'; }
+      set('tfg-class', badge(cls, bg, color));
+      set('tfg-detail', detail);
+      showResult('tfg-result', true);
+    }
+
+    /* ---- Dose por Peso ---- */
+    function calcDose() {
+      var peso = v('dp-peso'), dose = v('dp-dose'), conc = v('dp-conc');
+      if (!peso || !dose) { showResult('dp-result', false); return; }
+      var mg = peso * dose;
+      set('dp-val', mg.toFixed(1));
+      var detail = 'Dose total: <strong>' + mg.toFixed(1) + ' mg</strong> por dose.';
+      if (conc) {
+        var vol = mg / conc;
+        detail += '<br>Volume a administrar: <strong>' + vol.toFixed(2) + ' mL</strong> (concentracao ' + conc + ' mg/mL)';
+      }
+      set('dp-detail', detail);
+      showResult('dp-result', true);
+    }
+
+    /* ---- Hidratacao Venosa ---- */
+    function calcHV() {
+      var peso = v('hv-peso');
+      if (!peso) { showResult('hv-result', false); return; }
+      var ml;
+      if (peso <= 10)      ml = peso * 100;
+      else if (peso <= 20) ml = 1000 + (peso - 10) * 50;
+      else                 ml = 1500 + (peso - 20) * 20;
+      var mlH = ml / 24;
+      var gts = (ml / 24 / 3).toFixed(0);
+      set('hv-val', Math.round(ml));
+      set('hv-detail',
+        'Taxa horaria: <strong>' + mlH.toFixed(0) + ' mL/h</strong><br>' +
+        'Gotejamento: <strong>' + gts + ' gts/min</strong> (macrogotas)<br>' +
+        'Microgotas: <strong>' + (parseFloat(gts) * 3).toFixed(0) + ' mgt/min</strong>'
+      );
+      showResult('hv-result', true);
+    }
+
+    /* ---- Risco Cardiovascular ---- */
+    function calcRC() {
+      var idade = v('rc-idade'), pas = v('rc-pas'), col = v('rc-col');
+      var sexo = sv('rc-sexo'), tab = cv('rc-tabaco'), dm = cv('rc-dm'), hf = cv('rc-hf');
+      if (!idade) { showResult('rc-result', false); return; }
+      var pts = 0;
+      if (idade >= 45 && idade < 55) pts += 1;
+      else if (idade >= 55 && idade < 65) pts += 2;
+      else if (idade >= 65) pts += 3;
+      if (sexo === 'M') pts += 1;
+      if (pas >= 130 && pas < 140) pts += 1;
+      else if (pas >= 140 && pas < 160) pts += 2;
+      else if (pas >= 160) pts += 3;
+      if (col >= 200 && col < 240) pts += 1;
+      else if (col >= 240) pts += 2;
+      if (tab) pts += 2;
+      if (dm) pts += 2;
+      if (hf) pts += 1;
+      set('rc-val', pts);
+      var cls, bg, color, detail;
+      if (pts <= 2)      { cls = 'Baixo risco';    bg = '#D1FAE5'; color = '#0B8A6F'; detail = 'Manter estilo de vida saudavel e monitoramento periodico.'; }
+      else if (pts <= 5) { cls = 'Risco moderado'; bg = '#FEF3C7'; color = '#D97706'; detail = 'Modificacao de fatores de risco. Avaliar inicio de estatina.'; }
+      else if (pts <= 8) { cls = 'Risco alto';     bg = '#FEE2E2'; color = '#EF4444'; detail = 'Intervencao ativa. Estatina + controle pressorio rigoroso.'; }
+      else               { cls = 'Risco muito alto'; bg = '#FEE2E2'; color = '#991B1B'; detail = 'Manejo intensivo. Encaminhamento para cardiologista.'; }
+      set('rc-class', badge(cls, bg, color));
+      set('rc-detail', detail + '<br><small style="color:var(--t3);">Escore orientativo &mdash; use ferramentas validadas (Framingham, ESC SCORE2) para decisao clinica.</small>');
+      showResult('rc-result', true);
+    }
+
+    /* ---- PAM + Pressao de Pulso ---- */
+    function calcPAM() {
+      var sis = v('pam-sis'), dia = v('pam-dia');
+      if (!sis || !dia) { showResult('pam-result', false); return; }
+      var pam = dia + (sis - dia) / 3;
+      var pp  = sis - dia;
+      set('pam-val', pam.toFixed(0));
+      set('pam-label', 'mmHg (PAM)');
+      var cls, bg, color;
+      if (pam < 70)        { cls = 'PAM baixa &mdash; risco de hipoperfusao'; bg = '#FEE2E2'; color = '#EF4444'; }
+      else if (pam <= 100) { cls = 'PAM normal (70&ndash;100)'; bg = '#D1FAE5'; color = '#0B8A6F'; }
+      else                 { cls = 'PAM elevada'; bg = '#FEF3C7'; color = '#D97706'; }
+      set('pam-class', badge(cls, bg, color));
+      var ppCls = pp < 40 ? 'Normal' : pp < 60 ? 'Levemente aumentada' : 'Aumentada (&gt; 60 mmHg)';
+      set('pam-detail', 'Pressao de Pulso: <strong>' + pp + ' mmHg</strong> &mdash; ' + ppCls);
+      showResult('pam-result', true);
+    }
+  </script>
+
+</body>
+</html>
