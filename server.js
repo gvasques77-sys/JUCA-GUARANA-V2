@@ -3116,6 +3116,62 @@ if (conversationState?.booking_state === BOOKING_STATES.AWAITING_SLOTS &&
 }
 
 // ======================================================
+// FIX BUG2: Interceptor de exames de imagem / laboratoriais
+// Causa raiz: mensagens do tipo "tenho um pedido de raio-x, aceita convênio?"
+// continham keywords de info (convênio, preço) E palavras de exame.
+// O info interceptor não encontrava preço específico para o exame e
+// retornava o bloco genérico de convênios — completamente fora de contexto.
+// Solução: detectar keywords de imagem/lab ANTES de detectInfoQuestion e
+// retornar resposta específica ao contexto, sem entrar no fluxo de KB de preços.
+// ======================================================
+const _EXAM_IMAGING_RE = /\b(raio[\s-]?x|rx\b|radiografia|tomografia|ressonancia|ultrassom|ultrassonografia|mamografia|densitometria|cintilografia|endoscopia|colonoscopia|ecocardiograma|eletrocardiograma|ecg)\b/i;
+const _EXAM_LAB_RE     = /\b(hemograma|colesterol|glicemia|triglicerides|exame\s+de\s+sangue|exame\s+de\s+(urina|fezes)|laboratorio|laboratorial|bioquimica|sorologias?|pcr|tsh|psa)\b/i;
+const _PEDIDO_EXAME_RE = /\b(pedido\s+de\s+exame|resultado\s+de\s+exame|laudo|resultado|exames?\s+(de\s+imagem|laboratorial))\b/i;
+
+const _msgHasExamImaging = _EXAM_IMAGING_RE.test(envelope.message_text) ||
+                           _EXAM_LAB_RE.test(envelope.message_text)     ||
+                           _PEDIDO_EXAME_RE.test(envelope.message_text);
+
+if (_msgHasExamImaging && !envelope.intent_override) {
+  console.log(`[EXAM_INTERCEPT] Pergunta sobre exame/imagem detectada: "${envelope.message_text}"`);
+
+  // Verificar se a clínica tem algum serviço de exame cadastrado
+  const _hasExamService = services.some(s =>
+    /exame|imagem|raio|laborat|hemograma|ultrassom/i.test(s.name || '')
+  );
+
+  const _examMsg = _hasExamService
+    // FIX BUG2: Clínica tem serviço de exame → direcionar para agendamento
+    ? `Para agendamento de exames, posso verificar a disponibilidade aqui. Qual exame você precisa agendar? 😊`
+    // FIX BUG2: Clínica NÃO oferece exame → resposta clara e objetiva, sem retornar bloco de convênios
+    : `Realizamos apenas consultas médicas em nossa clínica. Para exames de imagem (raio-x, ultrassom, tomografia) ou laboratoriais, você precisará procurar um laboratório ou clínica de diagnóstico especializada.\n\nPosso te ajudar a agendar uma consulta com um de nossos médicos? 😊`;
+
+  await saveConversationTurn({
+    clinicId: envelope.clinic_id,
+    fromNumber: envelope.from,
+    correlationId: envelope.correlation_id,
+    userText: envelope.message_text,
+    assistantText: _examMsg,
+    intentGroup: 'other',
+    intent: 'exam_imaging_inquiry',
+    slots: null,
+  });
+  clearTimeout(timeoutId);
+  return res.json({
+    correlation_id: envelope.correlation_id,
+    final_message: _examMsg,
+    actions: _hasExamService ? [] : [{
+      type: 'send_interactive_buttons',
+      payload: { buttons: [
+        { id: 'schedule_new', title: '📅 Agendar consulta' },
+        { id: 'ask_question', title: '❓ Outra dúvida' },
+      ]},
+    }],
+    debug: DEBUG ? { source: 'exam_imaging_intercept', has_exam_service: _hasExamService } : undefined,
+  });
+}
+
+// ======================================================
 // CORREÇÃO PROBLEMA-2 e PROBLEMA-3: Interceptor de perguntas informativas
 // Quando a mensagem contém DÚVIDA (preço, convênio, pagamento) E há um
 // agendamento em andamento, responde a dúvida PRIMEIRO antes de retomar.
@@ -4351,7 +4407,23 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         };
         console.log('[CONFIRM] 🔍 PAYLOAD VALIDAÇÃO:', JSON.stringify(_confirmPayload));
         if (!updatedState.doctor_id || !_dateValid || !updatedState.preferred_time) {
-          console.error('[CONFIRM] ❌ Payload inválido:', { doctor_id: updatedState.doctor_id, data: _dateToBook, horario: updatedState.preferred_time });
+          // FIX BUG1 (logging): Log detalhado para facilitar diagnóstico futuro.
+          // Cada campo que falhou é identificado individualmente.
+          console.error('[CONFIRM_ERROR] ❌ Payload inválido ao processar confirm_yes:', {
+            doctor_id:          updatedState.doctor_id          || 'AUSENTE',
+            doctor_name:        updatedState.doctor_name        || 'AUSENTE',
+            preferred_date:     updatedState.preferred_date     || 'AUSENTE',
+            preferred_date_iso: updatedState.preferred_date_iso || 'AUSENTE',
+            preferred_time:     updatedState.preferred_time     || 'AUSENTE',
+            patient_name:       updatedState.patient_name       || 'AUSENTE',
+            service_id:         updatedState.service_id         || 'AUSENTE',
+            _dateToBook:        _dateToBook                     || 'AUSENTE',
+            _dateValid,
+            booking_state:      updatedState.booking_state,
+            intent_override:    envelope.intent_override,
+            clinic_id:          envelope.clinic_id,
+            from:               envelope.from,
+          });
           const invalidMsg = 'Ops, tive uma dificuldade técnica aqui! 😅 Não se preocupe — me conta novamente qual data e horário você prefere que eu cuido de tudo!';
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
             booking_state: BOOKING_STATES.COLLECTING_DATE,
@@ -4498,7 +4570,21 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         };
         console.log('[CONFIRM-TEXT] 🔍 PAYLOAD VALIDAÇÃO:', JSON.stringify(_confirmPayloadText));
         if (!updatedState.doctor_id || !_dateValidText || !updatedState.preferred_time) {
-          console.error('[CONFIRM-TEXT] ❌ Payload inválido:', { doctor_id: updatedState.doctor_id, data: _dateToBookText, horario: updatedState.preferred_time });
+          // FIX BUG1 (logging): Log detalhado para diagnóstico futuro (caminho texto "sim").
+          console.error('[CONFIRM_ERROR] ❌ Payload inválido (confirm via texto):', {
+            doctor_id:          updatedState.doctor_id          || 'AUSENTE',
+            doctor_name:        updatedState.doctor_name        || 'AUSENTE',
+            preferred_date:     updatedState.preferred_date     || 'AUSENTE',
+            preferred_date_iso: updatedState.preferred_date_iso || 'AUSENTE',
+            preferred_time:     updatedState.preferred_time     || 'AUSENTE',
+            patient_name:       updatedState.patient_name       || 'AUSENTE',
+            _dateToBookText:    _dateToBookText                 || 'AUSENTE',
+            _dateValidText,
+            booking_state:      updatedState.booking_state,
+            user_text:          envelope.message_text,
+            clinic_id:          envelope.clinic_id,
+            from:               envelope.from,
+          });
           const invalidMsg2 = 'Ops, tive uma dificuldade técnica aqui! 😅 Não se preocupe — me conta novamente qual data e horário você prefere que eu cuido de tudo!';
           await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
             booking_state: BOOKING_STATES.COLLECTING_DATE,
@@ -4682,9 +4768,23 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         // Pular para o final — não entrar em CONFIRMING com data inválida
       } else {
       // Todos os campos preenchidos → entrar em CONFIRMING (uma única chamada atômica)
+      // FIX BUG1: Persist all critical appointment fields along with booking_state.
+      // Causa raiz: o SLOT_OVERRIDE (linha ~4098) atribui updatedState.preferred_time
+      // em memória DEPOIS que updateConversationState já salvou no DB com null.
+      // A transição anterior só persistia booking_state e conversation_stage,
+      // deixando preferred_time/preferred_date/doctor_id possivelmente null no DB.
+      // Quando confirm_yes chegava no próximo request, loadConversationState lia null
+      // e a validação falhava com "Ops, tive uma dificuldade técnica".
       await updateConversationState(supabase, envelope.clinic_id, envelope.from, {
         booking_state: BOOKING_STATES.CONFIRMING,
         conversation_stage: 'awaiting_confirmation',
+        preferred_time:     updatedState.preferred_time     || null,
+        preferred_date:     updatedState.preferred_date     || null,
+        preferred_date_iso: updatedState.preferred_date_iso || null,
+        doctor_id:          updatedState.doctor_id          || null,
+        doctor_name:        updatedState.doctor_name        || null,
+        patient_name:       updatedState.patient_name       || null,
+        service_id:         updatedState.service_id         || null,
       });
       logDecision('state_transition', {
         from: updatedState.booking_state,
