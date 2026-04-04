@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prontuario - CLINICORE</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:         #EFF6F3;
+      --bg2:        #FFFFFF;
+      --card:       #FFFFFF;
+      --cardH:      #F8FDFB;
+      --bdr:        rgba(11,138,111,.10);
+      --bdr-h:      rgba(11,138,111,.22);
+      --bdr-a:      rgba(11,138,111,.50);
+      --t1:         #0F172A;
+      --t2:         #475569;
+      --t3:         #94A3B8;
+      --accent:     #0B8A6F;
+      --accent-l:   #10B981;
+      --accent-bg:  #D1FAE5;
+      --accent-r:   #EF4444;
+      --accent-r-bg:#FEE2E2;
+      --accent-a:   #D97706;
+      --accent-a-bg:#FEF3C7;
+      --accent-b:   #2563EB;
+      --accent-b-bg:#DBEAFE;
+      --shadow:     0 4px 24px rgba(11,138,111,.07), 0 1px 3px rgba(0,0,0,.05);
+      --shadow-sm:  0 2px 8px rgba(0,0,0,.06);
+      --shadow-lg:  0 8px 40px rgba(11,138,111,.12);
+      --radius-sm:  8px;
+      --radius-md:  12px;
+      --radius-lg:  16px;
+      --radius-xl:  20px;
+      --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { font-family: "Inter", sans-serif; background: var(--bg); color: var(--t1); }
+    button { font-family: "Inter", sans-serif; }
+    input, select, textarea { font-family: "Inter", sans-serif; }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--bdr-a) !important;
+      box-shadow: 0 0 0 3px rgba(11,138,111,.10);
+    }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--bdr-h); border-radius: 3px; }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .fi { animation: fadeSlideIn 320ms var(--ease-out) both; }
+    .skel {
+      background: linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.6s ease-in-out infinite;
+      border-radius: var(--radius-sm);
+    }
+    @media (max-width: 768px) { .pr-sidebar { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script>
+    var API = "/crm/api";
+    var SUPABASE_URL = "https://edamtnxcwuuydwwbimvz.supabase.co";
+    var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkYW10bnhjd3V1eWR3d2JpbXZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0NDI2MzksImV4cCI6MjA4NjAxODYzOX0.uzu52-qEHatsBoQBJj145wDROcbuYSNFbSzgWDrqUeg";
+    var sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    var _currentToken = null;
+    sbClient.auth.onAuthStateChange(function(event, session) {
+      if (session && session.access_token) { _currentToken = session.access_token; }
+      else { _currentToken = null; }
+    });
+    function getToken() { return _currentToken; }
+    function logout() {
+      _currentToken = null;
+      sbClient.auth.signOut();
+      window.location.href = "/crm/login.html";
+    }
+    async function initToken() {
+      var r = await sbClient.auth.getSession();
+      if (r.error || !r.data.session) return null;
+      _currentToken = r.data.session.access_token;
+      return _currentToken;
+    }
+    async function refreshToken() {
+      try {
+        var r = await sbClient.auth.refreshSession();
+        if (r.error || !r.data.session) return null;
+        _currentToken = r.data.session.access_token;
+        return _currentToken;
+      } catch(e) { return null; }
+    }
+    function q(p, o) {
+      var token = getToken();
+      if (!token) {
+        return refreshToken().then(function(t) {
+          if (!t) { window.location.href = "/crm/login.html"; return null; }
+          return q(p, o);
+        }).catch(function() { window.location.href = "/crm/login.html"; return null; });
+      }
+      var opts = o || {};
+      opts.headers = Object.assign({"Authorization": "Bearer " + token, "Content-Type": "application/json"}, opts.headers || {});
+      return fetch(API + p, opts).then(function(r) {
+        if (r.status === 401) {
+          return refreshToken().then(function(t) {
+            if (!t) { logout(); return null; }
+            opts.headers["Authorization"] = "Bearer " + t;
+            return fetch(API + p, opts).then(function(r2) {
+              if (r2.status === 401 || r2.status === 403) { logout(); return null; }
+              return r2.json();
+            }).catch(function() { return null; });
+          });
+        }
+        if (r.status === 403) { logout(); return null; }
+        return r.json();
+      });
+    }
+    function getPatientId() {
+      var params = new URLSearchParams(window.location.search);
+      return params.get("id");
+    }
+    function calcAge(bd) {
+      if (!bd) return "--";
+      var today = new Date(); var birth = new Date(bd);
+      var age = today.getFullYear() - birth.getFullYear();
+      var m = today.getMonth() - birth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+      return age + " anos";
+    }
+    function fmtDate(d) {
+      if (!d) return "--";
+      return new Date(d).toLocaleDateString("pt-BR");
+    }
+    function calcBMI(weight, height) {
+      if (!weight || !height) return null;
+      var hm = parseFloat(height) / 100;
+      var bmi = parseFloat(weight) / (hm * hm);
+      var label = bmi < 18.5 ? "Abaixo do peso" : bmi < 25 ? "Normal" : bmi < 30 ? "Sobrepeso" : "Obesidade";
+      var color = bmi < 18.5 ? "var(--accent-a)" : bmi < 25 ? "var(--accent)" : bmi < 30 ? "var(--accent-a)" : "var(--accent-r)";
+      return { value: bmi.toFixed(1), label: label, color: color };
+    }
+    function getInitials(name) {
+      if (!name) return "?";
+      var parts = name.trim().split(" ");
+      if (parts.length === 1) return parts[0][0].toUpperCase();
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    function todayDate() {
+      var t = new Date();
+      var y = t.getFullYear();
+      var mo = ("0" + (t.getMonth() + 1)).slice(-2);
+      var d = ("0" + t.getDate()).slice(-2);
+      return y + "-" + mo + "-" + d;
+    }
+  </script>
+  <script type="text/babel">
+    var h = React.createElement;
+
+    /* ---- utilidades de estilo ---- */
+    function iSt(extra) {
+      return Object.assign({
+        width: "100%", padding: "8px 12px",
+        border: "1px solid var(--bdr)", borderRadius: "var(--radius-sm)",
+        fontSize: 13, color: "var(--t1)", background: "#fff", fontFamily: "Inter"
+      }, extra || {});
+    }
+
+    /* ---- componentes base ---- */
+    function LoadingSkel() {
+      return h("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+        h("div", { className: "skel", style: { height: 52 } }),
+        h("div", { className: "skel", style: { height: 52 } }),
+        h("div", { className: "skel", style: { height: 52 } })
+      );
+    }
+
+    function LoadingScreen() {
+      return h("div", { style: { height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)" } },
+        h("div", { style: { textAlign: "center" } },
+          h("div", { style: { width: 40, height: 40, border: "3px solid var(--bdr)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" } }),
+          h("div", { style: { fontSize: 14, color: "var(--t2)" } }, "Carregando prontuario...")
+        )
+      );
+    }
+
+    function ErrorScreen({ message }) {
+      return h("div", { style: { height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)" } },
+        h("div", { style: { textAlign: "center", maxWidth: 400, padding: 24 } },
+          h("div", { style: { fontSize: 40, marginBottom: 16 } }, "!"),
+          h("div", { style: { fontSize: 16, fontWeight: 600, color: "var(--t1)", marginBottom: 8 } }, "Erro ao carregar"),
+          h("div", { style: { fontSize: 14, color: "var(--t2)", marginBottom: 24 } }, message),
+          h("button", {
+            onClick: function() { window.location.href = "/crm/"; },
+            style: { background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "10px 24px", cursor: "pointer", fontSize: 14, fontWeight: 600 }
+          }, "Voltar ao CRM")
+        )
+      );
+    }
+
+    function BtnPrimary({ label, onClick, loading, small }) {
+      return h("button", {
+        onClick: onClick, disabled: !!loading,
+        style: {
+          background: loading ? "var(--t3)" : "var(--accent)", color: "#fff",
+          border: "none", borderRadius: "var(--radius-sm)",
+          padding: small ? "6px 12px" : "8px 18px",
+          fontSize: small ? 12 : 13, fontWeight: 600,
+          cursor: loading ? "not-allowed" : "pointer",
+          boxShadow: "0 2px 8px rgba(11,138,111,.20)",
+          transition: "all 180ms var(--ease-out)"
+        }
+      }, loading ? "Salvando..." : label);
+    }
+
+    function EmptyState({ message }) {
+      return h("div", { style: { textAlign: "center", padding: "40px 0", color: "var(--t3)", fontSize: 14 } },
+        h("div", { style: { fontSize: 32, marginBottom: 8 } }, "∅"),
+        h("div", null, message || "Nenhum registro encontrado")
+      );
+    }
+
+    function StatusBadge({ status }) {
+      var map = {
+        "ativo":         { bg: "var(--accent-bg)",   color: "var(--accent)" },
+        "cronico":       { bg: "var(--accent-a-bg)", color: "var(--accent-a)" },
+        "resolvido":     { bg: "#F1F5F9",            color: "var(--t3)" },
+        "suspeito":      { bg: "var(--accent-b-bg)", color: "var(--accent-b)" },
+        "finalizada":    { bg: "var(--accent-bg)",   color: "var(--accent)" },
+        "em_andamento":  { bg: "var(--accent-b-bg)", color: "var(--accent-b)" },
+        "cancelada":     { bg: "#F1F5F9",            color: "var(--t3)" },
+        "solicitado":    { bg: "var(--accent-b-bg)", color: "var(--accent-b)" },
+        "realizado":     { bg: "var(--accent-bg)",   color: "var(--accent)" },
+        "ativa":         { bg: "var(--accent-bg)",   color: "var(--accent)" }
+      };
+      var s = map[status] || { bg: "#F1F5F9", color: "var(--t3)" };
+      return h("span", {
+        style: { fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 9999, background: s.bg, color: s.color, whiteSpace: "nowrap" }
+      }, status ? status.replace(/_/g, " ") : "--");
+    }
+
+    function ContentCard({ title, children, action }) {
+      return h("div", {
+        style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-lg)", padding: "20px 24px", boxShadow: "var(--shadow-sm)" }
+      },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
+          h("h3", { style: { fontSize: 14, fontWeight: 700, color: "var(--t1)", margin: 0 } }, title),
+          action || null
+        ),
+        children
+      );
+    }
+
+    function FormField({ label, children }) {
+      return h("div", { style: { marginBottom: 14 } },
+        h("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "var(--t2)", marginBottom: 6 } }, label),
+        children
+      );
+    }
+
+    function Modal({ title, onClose, children }) {
+      return h("div", {
+        onClick: function(e) { if (e.target === e.currentTarget) onClose(); },
+        style: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(15,23,42,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }
+      },
+        h("div", { style: { background: "#fff", borderRadius: "var(--radius-xl)", padding: 28, width: "100%", maxWidth: 480, maxHeight: "85vh", overflowY: "auto", boxShadow: "var(--shadow-lg)" } },
+          h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 } },
+            h("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--t1)", margin: 0 } }, title),
+            h("button", { onClick: onClose, style: { background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--t3)", lineHeight: 1 } }, "×")
+          ),
+          children
+        )
+      );
+    }
+
+    function ModalFooter({ onClose, onSave, saving, saveLabel }) {
+      return h("div", { style: { display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--bdr)" } },
+        h("button", { onClick: onClose, style: { background: "none", border: "1px solid var(--bdr)", borderRadius: "var(--radius-sm)", padding: "8px 18px", fontSize: 13, cursor: "pointer", color: "var(--t2)" } }, "Cancelar"),
+        h(BtnPrimary, { label: saveLabel || "Salvar", onClick: onSave, loading: saving })
+      );
+    }
+
+    /* ---- sidebar atoms ---- */
+    function VitalItem({ label, value }) {
+      return h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        h("span", { style: { fontSize: 11, color: "var(--t3)", width: 38 } }, label),
+        h("span", { style: { fontSize: 13, fontWeight: 600, color: "var(--t1)", fontFamily: "JetBrains Mono" } }, value)
+      );
+    }
+
+    function SidebarItem({ label, value, highlight }) {
+      return h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0" } },
+        h("span", { style: { fontSize: 12, color: "var(--t3)" } }, label),
+        value
+          ? h("span", { style: { fontSize: 13, fontWeight: 600, color: highlight ? "var(--accent)" : "var(--t1)", background: highlight ? "var(--accent-bg)" : "transparent", padding: highlight ? "2px 8px" : "0", borderRadius: highlight ? 9999 : 0 } }, value)
+          : h("span", { style: { fontSize: 12, color: "var(--t3)", fontStyle: "italic" } }, "--")
+      );
+    }
+
+    function SidebarSection({ label, children }) {
+      return h("div", null,
+        h("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--t3)", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 10 } }, label),
+        children
+      );
+    }
+
+    /* ---- Tab Resumo ---- */
+    function MiniKPI({ label, value, icon, note }) {
+      return h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-lg)", padding: "16px 20px", boxShadow: "var(--shadow-sm)" } },
+        h("div", { style: { fontSize: 22, marginBottom: 8 } }, icon),
+        h("div", { style: { fontSize: 26, fontWeight: 700, color: "var(--accent)", fontFamily: "JetBrains Mono" } }, String(value)),
+        h("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--t1)", marginTop: 2 } }, label),
+        h("div", { style: { fontSize: 11, color: "var(--t3)" } }, note)
+      );
+    }
+
+    function ConsultationRow({ c }) {
+      var sc = { "finalizada": { bg: "var(--accent-bg)", col: "var(--accent)" }, "em_andamento": { bg: "var(--accent-b-bg)", col: "var(--accent-b)" }, "cancelada": { bg: "#F1F5F9", col: "var(--t3)" } };
+      var s = sc[c.status] || sc["em_andamento"];
+      return h("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: "1px solid var(--bdr)" } },
+        h("span", { style: { fontSize: 12, color: "var(--t3)", fontFamily: "JetBrains Mono", width: 80, flexShrink: 0 } }, fmtDate(c.consultation_date)),
+        h("span", { style: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 9999, background: "var(--accent-bg)", color: "var(--accent)", flexShrink: 0 } }, c.consultation_type || "presencial"),
+        h("span", { style: { flex: 1, fontSize: 13, color: "var(--t1)" } }, c.chief_complaint || "Sem queixa"),
+        h("span", { style: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 9999, background: s.bg, color: s.col, flexShrink: 0 } }, c.status ? c.status.replace(/_/g, " ") : "--")
+      );
+    }
+
+    function TabResumo({ summary }) {
+      var cons  = summary.recent_consultations || [];
+      var diags = summary.active_diagnoses    || [];
+      var meds  = summary.active_medications  || [];
+      var vacs  = summary.vaccines            || [];
+      return h("div", { className: "fi", style: { display: "flex", flexDirection: "column", gap: 20 } },
+        h("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 } },
+          h(MiniKPI, { label: "Consultas",          value: cons.length,  icon: "📋", note: "recentes" }),
+          h(MiniKPI, { label: "Diagnosticos Ativos",value: diags.length, icon: "🔬", note: "ativos" }),
+          h(MiniKPI, { label: "Medicamentos",       value: meds.length,  icon: "💊", note: "em uso" }),
+          h(MiniKPI, { label: "Vacinas",            value: vacs.length,  icon: "💉", note: "registradas" })
+        ),
+        h(ContentCard, { title: "Ultimas Consultas" },
+          cons.length === 0 ? h(EmptyState, { message: "Nenhuma consulta registrada" }) :
+            h("div", null, cons.map(function(c) { return h(ConsultationRow, { key: c.id, c: c }); }))
+        ),
+        diags.length > 0 && h(ContentCard, { title: "Diagnosticos Ativos" },
+          h("div", null, diags.map(function(d) {
+            return h("div", { key: d.id, style: { display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--bdr)" } },
+              d.cid_code && h("span", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", fontFamily: "JetBrains Mono", background: "var(--accent-bg)", padding: "2px 8px", borderRadius: 6, flexShrink: 0 } }, d.cid_code),
+              h("span", { style: { flex: 1, fontSize: 14, color: "var(--t1)" } }, d.cid_description || "Sem descricao"),
+              h(StatusBadge, { status: d.status })
+            );
+          }))
+        )
+      );
+    }
+
+    /* ---- Tab Consultas ---- */
+    function SOAPBlock({ label, content }) {
+      return h("div", { style: { background: "var(--bg)", borderRadius: "var(--radius-sm)", padding: "12px 14px" } },
+        h("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 } }, label),
+        h("div", { style: { fontSize: 14, color: "var(--t1)", lineHeight: 1.6, whiteSpace: "pre-wrap" } }, content)
+      );
+    }
+
+    function ConsultaCard({ c, expanded, onToggle }) {
+      var [full, setFull] = React.useState(null);
+      var [loadingFull, setLoadingFull] = React.useState(false);
+      React.useEffect(function() {
+        if (expanded && !full && !loadingFull) {
+          setLoadingFull(true);
+          q("/prontuario/consultation/" + c.id)
+            .then(function(res) { if (res && res.id) setFull(res); })
+            .finally(function() { setLoadingFull(false); });
+        }
+      }, [expanded]);
+      var doc = c.doctors ? c.doctors.name : "--";
+      return h("div", { style: { background: "var(--card)", border: "1px solid " + (expanded ? "var(--bdr-a)" : "var(--bdr)"), borderRadius: "var(--radius-md)", overflow: "hidden", boxShadow: "var(--shadow-sm)" } },
+        h("div", { onClick: onToggle, style: { display: "flex", alignItems: "center", gap: 10, padding: "14px 20px", cursor: "pointer", background: expanded ? "var(--cardH)" : "#fff" } },
+          h("span", { style: { fontSize: 12, color: "var(--t3)", fontFamily: "JetBrains Mono", width: 88, flexShrink: 0 } }, fmtDate(c.consultation_date)),
+          h("span", { style: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 9999, background: "var(--accent-bg)", color: "var(--accent)", flexShrink: 0 } }, c.consultation_type || "presencial"),
+          h("span", { style: { flex: 1, fontSize: 14, color: "var(--t1)", fontWeight: 500 } }, c.chief_complaint || "Sem queixa"),
+          h("span", { style: { fontSize: 12, color: "var(--t2)", flexShrink: 0 } }, doc),
+          h(StatusBadge, { status: c.status }),
+          h("span", { style: { fontSize: 11, color: "var(--t3)", marginLeft: 6 } }, expanded ? "▲" : "▼")
+        ),
+        expanded && h("div", { style: { padding: "0 20px 20px", borderTop: "1px solid var(--bdr)" } },
+          loadingFull ? h("div", { style: { paddingTop: 16 } }, h(LoadingSkel)) :
+          full ? h("div", { style: { display: "flex", flexDirection: "column", gap: 10, paddingTop: 16 } },
+            full.soap_subjective && h(SOAPBlock, { label: "S - Subjetivo",   content: full.soap_subjective }),
+            full.soap_objective  && h(SOAPBlock, { label: "O - Objetivo",    content: full.soap_objective }),
+            full.soap_assessment && h(SOAPBlock, { label: "A - Avaliacao",   content: full.soap_assessment }),
+            full.soap_plan       && h(SOAPBlock, { label: "P - Plano",       content: full.soap_plan }),
+            full.diagnosis_notes && h(SOAPBlock, { label: "Notas Diagnostico",content: full.diagnosis_notes }),
+            full.treatment_plan  && h(SOAPBlock, { label: "Plano Tratamento", content: full.treatment_plan }),
+            full.follow_up_date  && h("div", { style: { fontSize: 13, color: "var(--t2)", paddingTop: 4 } }, "Retorno: " + fmtDate(full.follow_up_date)),
+            !full.soap_subjective && !full.soap_objective && !full.soap_assessment && !full.soap_plan && !full.diagnosis_notes && !full.treatment_plan &&
+              h("div", { style: { textAlign: "center", color: "var(--t3)", fontSize: 13, padding: "16px 0" } }, "Nenhum detalhe SOAP registrado.")
+          ) : h("div", { style: { color: "var(--t3)", fontSize: 13, paddingTop: 16 } }, "Nao foi possivel carregar os detalhes.")
+        )
+      );
+    }
+
+    function TabConsultas({ patientId }) {
+      var [data, setData]           = React.useState([]);
+      var [loading, setLoading]     = React.useState(true);
+      var [expanded, setExpanded]   = React.useState(null);
+      var [showModal, setShowModal] = React.useState(false);
+      var [saving, setSaving]       = React.useState(false);
+      var [form, setForm] = React.useState({ consultation_date: "", consultation_type: "presencial", chief_complaint: "" });
+      React.useEffect(function() {
+        setForm(function(p) { return Object.assign({}, p, { consultation_date: todayDate() }); });
+        q("/prontuario/patient/" + patientId + "/consultations?limit=50")
+          .then(function(r) { if (r && Array.isArray(r)) setData(r); })
+          .finally(function() { setLoading(false); });
+      }, [patientId]);
+      function handleCreate() {
+        if (!form.chief_complaint.trim()) return;
+        setSaving(true);
+        q("/prontuario/patient/" + patientId + "/consultations", { method: "POST", body: JSON.stringify(form) })
+          .then(function(r) {
+            if (r && r.id) { setData(function(p) { return [r].concat(p); }); setShowModal(false); setForm({ consultation_date: todayDate(), consultation_type: "presencial", chief_complaint: "" }); }
+          }).finally(function() { setSaving(false); });
+      }
+      function setF(k, v) { setForm(function(p) { var o = {}; o[k] = v; return Object.assign({}, p, o); }); }
+      return h("div", { className: "fi", style: { display: "flex", flexDirection: "column", gap: 14 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--t1)", margin: 0 } }, "Consultas (" + data.length + ")"),
+          h(BtnPrimary, { label: "+ Nova Consulta", onClick: function() { setShowModal(true); } })
+        ),
+        loading ? h(LoadingSkel) :
+        data.length === 0 ? h(EmptyState, { message: "Nenhuma consulta registrada" }) :
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+            data.map(function(c) {
+              return h(ConsultaCard, { key: c.id, c: c, expanded: expanded === c.id, onToggle: function() { setExpanded(function(p) { return p === c.id ? null : c.id; }); } });
+            })
+          ),
+        showModal && h(Modal, { title: "Nova Consulta", onClose: function() { setShowModal(false); } },
+          h(FormField, { label: "Data" }, h("input", { type: "date", value: form.consultation_date, onChange: function(e) { setF("consultation_date", e.target.value); }, style: iSt() })),
+          h(FormField, { label: "Tipo" },
+            h("select", { value: form.consultation_type, onChange: function(e) { setF("consultation_type", e.target.value); }, style: iSt() },
+              h("option", { value: "presencial" }, "Presencial"),
+              h("option", { value: "telemedicina" }, "Telemedicina"),
+              h("option", { value: "retorno" }, "Retorno"),
+              h("option", { value: "urgencia" }, "Urgencia")
+            )
+          ),
+          h(FormField, { label: "Queixa Principal *" }, h("textarea", { value: form.chief_complaint, onChange: function(e) { setF("chief_complaint", e.target.value); }, rows: 3, placeholder: "Descreva a queixa principal...", style: iSt({ resize: "vertical" }) })),
+          h(ModalFooter, { onClose: function() { setShowModal(false); }, onSave: handleCreate, saving: saving, saveLabel: "Criar Consulta" })
+        )
+      );
+    }
+
+    /* ---- Tab Historico (sub-tabs) ---- */
+    function SubMedications({ patientId }) {
+      var [data, setData]           = React.useState([]);
+      var [loading, setLoading]     = React.useState(true);
+      var [showModal, setShowModal] = React.useState(false);
+      var [saving, setSaving]       = React.useState(false);
+      var [form, setForm] = React.useState({ name: "", dosage: "", frequency: "", route: "" });
+      React.useEffect(function() {
+        q("/prontuario/patient/" + patientId + "/medications")
+          .then(function(r) { if (r && Array.isArray(r)) setData(r); })
+          .finally(function() { setLoading(false); });
+      }, [patientId]);
+      function handleCreate() {
+        if (!form.name.trim()) return;
+        setSaving(true);
+        q("/prontuario/patient/" + patientId + "/medications", { method: "POST", body: JSON.stringify(form) })
+          .then(function(r) { if (r && r.id) { setData(function(p) { return [r].concat(p); }); setShowModal(false); setForm({ name: "", dosage: "", frequency: "", route: "" }); } })
+          .finally(function() { setSaving(false); });
+      }
+      function setF(k, v) { setForm(function(p) { var o = {}; o[k] = v; return Object.assign({}, p, o); }); }
+      if (loading) return h(LoadingSkel);
+      return h("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+          h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, "Medicamentos"),
+          h(BtnPrimary, { label: "+ Adicionar", onClick: function() { setShowModal(true); }, small: true })
+        ),
+        data.length === 0 ? h(EmptyState, { message: "Nenhum medicamento registrado" }) :
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+            data.map(function(m) {
+              return h("div", { key: m.id, style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 } },
+                h("div", { style: { fontSize: 20 } }, "💊"),
+                h("div", { style: { flex: 1 } },
+                  h("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, m.name),
+                  h("div", { style: { fontSize: 12, color: "var(--t3)", marginTop: 2 } }, [m.dosage, m.frequency, m.route].filter(Boolean).join(" · "))
+                ),
+                h("span", { style: { fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 9999, background: m.active ? "var(--accent-bg)" : "#F1F5F9", color: m.active ? "var(--accent)" : "var(--t3)" } }, m.active ? "Ativo" : "Inativo")
+              );
+            })
+          ),
+        showModal && h(Modal, { title: "Adicionar Medicamento", onClose: function() { setShowModal(false); } },
+          h(FormField, { label: "Nome *" }, h("input", { type: "text", value: form.name, onChange: function(e) { setF("name", e.target.value); }, placeholder: "Ex: Metformina", style: iSt() })),
+          h(FormField, { label: "Dose" }, h("input", { type: "text", value: form.dosage, onChange: function(e) { setF("dosage", e.target.value); }, placeholder: "Ex: 500mg", style: iSt() })),
+          h(FormField, { label: "Frequencia" }, h("input", { type: "text", value: form.frequency, onChange: function(e) { setF("frequency", e.target.value); }, placeholder: "Ex: 2x ao dia", style: iSt() })),
+          h(FormField, { label: "Via" }, h("input", { type: "text", value: form.route, onChange: function(e) { setF("route", e.target.value); }, placeholder: "Ex: Oral", style: iSt() })),
+          h(ModalFooter, { onClose: function() { setShowModal(false); }, onSave: handleCreate, saving: saving, saveLabel: "Adicionar" })
+        )
+      );
+    }
+
+    function SubAllergies({ patientId }) {
+      var [data, setData]           = React.useState([]);
+      var [loading, setLoading]     = React.useState(true);
+      var [showModal, setShowModal] = React.useState(false);
+      var [saving, setSaving]       = React.useState(false);
+      var [form, setForm] = React.useState({ allergen: "", severity: "moderada", reaction: "" });
+      React.useEffect(function() {
+        q("/prontuario/patient/" + patientId + "/allergies")
+          .then(function(r) { if (r && Array.isArray(r)) setData(r); })
+          .finally(function() { setLoading(false); });
+      }, [patientId]);
+      function handleCreate() {
+        if (!form.allergen.trim()) return;
+        setSaving(true);
+        q("/prontuario/patient/" + patientId + "/allergies", { method: "POST", body: JSON.stringify(form) })
+          .then(function(r) { if (r && r.id) { setData(function(p) { return [r].concat(p); }); setShowModal(false); setForm({ allergen: "", severity: "moderada", reaction: "" }); } })
+          .finally(function() { setSaving(false); });
+      }
+      function setF(k, v) { setForm(function(p) { var o = {}; o[k] = v; return Object.assign({}, p, o); }); }
+      var sevC = { leve: { bg: "var(--accent-b-bg)", c: "var(--accent-b)" }, moderada: { bg: "var(--accent-a-bg)", c: "var(--accent-a)" }, grave: { bg: "var(--accent-r-bg)", c: "var(--accent-r)" }, anafilaxia: { bg: "var(--accent-r-bg)", c: "var(--accent-r)" } };
+      if (loading) return h(LoadingSkel);
+      return h("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+          h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, "Alergias"),
+          h(BtnPrimary, { label: "+ Adicionar", onClick: function() { setShowModal(true); }, small: true })
+        ),
+        data.length === 0 ? h(EmptyState, { message: "Nenhuma alergia registrada" }) :
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+            data.map(function(a) {
+              var sc = sevC[a.severity] || sevC.moderada;
+              return h("div", { key: a.id, style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 } },
+                h("span", { style: { fontSize: 18 } }, "⚠️"),
+                h("div", { style: { flex: 1 } },
+                  h("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, a.allergen),
+                  a.reaction && h("div", { style: { fontSize: 12, color: "var(--t3)", marginTop: 2 } }, a.reaction)
+                ),
+                h("span", { style: { fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 9999, background: sc.bg, color: sc.c } }, a.severity)
+              );
+            })
+          ),
+        showModal && h(Modal, { title: "Registrar Alergia", onClose: function() { setShowModal(false); } },
+          h(FormField, { label: "Alergeno *" }, h("input", { type: "text", value: form.allergen, onChange: function(e) { setF("allergen", e.target.value); }, placeholder: "Ex: Penicilina", style: iSt() })),
+          h(FormField, { label: "Gravidade" },
+            h("select", { value: form.severity, onChange: function(e) { setF("severity", e.target.value); }, style: iSt() },
+              h("option", { value: "leve" }, "Leve"), h("option", { value: "moderada" }, "Moderada"),
+              h("option", { value: "grave" }, "Grave"), h("option", { value: "anafilaxia" }, "Anafilaxia")
+            )
+          ),
+          h(FormField, { label: "Reacao" }, h("input", { type: "text", value: form.reaction, onChange: function(e) { setF("reaction", e.target.value); }, placeholder: "Ex: Urticaria, dificuldade respiratoria", style: iSt() })),
+          h(ModalFooter, { onClose: function() { setShowModal(false); }, onSave: handleCreate, saving: saving, saveLabel: "Registrar" })
+        )
+      );
+    }
+
+    function SubVaccines({ patientId }) {
+      var [data, setData]           = React.useState([]);
+      var [loading, setLoading]     = React.useState(true);
+      var [showModal, setShowModal] = React.useState(false);
+      var [saving, setSaving]       = React.useState(false);
+      var [form, setForm] = React.useState({ vaccine_name: "", dose_number: 1, application_date: "" });
+      React.useEffect(function() {
+        setForm(function(p) { return Object.assign({}, p, { application_date: todayDate() }); });
+        q("/prontuario/patient/" + patientId + "/vaccines")
+          .then(function(r) { if (r && Array.isArray(r)) setData(r); })
+          .finally(function() { setLoading(false); });
+      }, [patientId]);
+      function handleCreate() {
+        if (!form.vaccine_name.trim()) return;
+        setSaving(true);
+        q("/prontuario/patient/" + patientId + "/vaccines", { method: "POST", body: JSON.stringify(form) })
+          .then(function(r) { if (r && r.id) { setData(function(p) { return [r].concat(p); }); setShowModal(false); setForm({ vaccine_name: "", dose_number: 1, application_date: todayDate() }); } })
+          .finally(function() { setSaving(false); });
+      }
+      function setF(k, v) { setForm(function(p) { var o = {}; o[k] = v; return Object.assign({}, p, o); }); }
+      if (loading) return h(LoadingSkel);
+      return h("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+          h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, "Vacinas"),
+          h(BtnPrimary, { label: "+ Adicionar", onClick: function() { setShowModal(true); }, small: true })
+        ),
+        data.length === 0 ? h(EmptyState, { message: "Nenhuma vacina registrada" }) :
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+            data.map(function(v) {
+              return h("div", { key: v.id, style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 } },
+                h("span", { style: { fontSize: 20 } }, "💉"),
+                h("div", { style: { flex: 1 } },
+                  h("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, v.vaccine_name),
+                  h("div", { style: { fontSize: 12, color: "var(--t3)", marginTop: 2 } }, "Dose " + v.dose_number + (v.application_date ? " · " + fmtDate(v.application_date) : ""))
+                ),
+                v.next_dose_date && h("span", { style: { fontSize: 11, color: "var(--accent-a)", fontWeight: 500 } }, "Prox: " + fmtDate(v.next_dose_date))
+              );
+            })
+          ),
+        showModal && h(Modal, { title: "Registrar Vacina", onClose: function() { setShowModal(false); } },
+          h(FormField, { label: "Vacina *" }, h("input", { type: "text", value: form.vaccine_name, onChange: function(e) { setF("vaccine_name", e.target.value); }, placeholder: "Ex: Influenza, COVID-19", style: iSt() })),
+          h(FormField, { label: "Numero da Dose" }, h("input", { type: "number", min: 1, max: 10, value: form.dose_number, onChange: function(e) { setF("dose_number", parseInt(e.target.value) || 1); }, style: iSt() })),
+          h(FormField, { label: "Data de Aplicacao" }, h("input", { type: "date", value: form.application_date, onChange: function(e) { setF("application_date", e.target.value); }, style: iSt() })),
+          h(ModalFooter, { onClose: function() { setShowModal(false); }, onSave: handleCreate, saving: saving, saveLabel: "Registrar" })
+        )
+      );
+    }
+
+    function SubFamilyHistory({ patientId }) {
+      var [data, setData]           = React.useState([]);
+      var [loading, setLoading]     = React.useState(true);
+      var [showModal, setShowModal] = React.useState(false);
+      var [saving, setSaving]       = React.useState(false);
+      var [form, setForm] = React.useState({ relationship: "pai", condition: "", notes: "" });
+      React.useEffect(function() {
+        q("/prontuario/patient/" + patientId + "/family-history")
+          .then(function(r) { if (r && Array.isArray(r)) setData(r); })
+          .finally(function() { setLoading(false); });
+      }, [patientId]);
+      function handleCreate() {
+        if (!form.condition.trim()) return;
+        setSaving(true);
+        q("/prontuario/patient/" + patientId + "/family-history", { method: "POST", body: JSON.stringify(form) })
+          .then(function(r) { if (r && r.id) { setData(function(p) { return [r].concat(p); }); setShowModal(false); setForm({ relationship: "pai", condition: "", notes: "" }); } })
+          .finally(function() { setSaving(false); });
+      }
+      function setF(k, v) { setForm(function(p) { var o = {}; o[k] = v; return Object.assign({}, p, o); }); }
+      if (loading) return h(LoadingSkel);
+      return h("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+          h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, "Historico Familiar"),
+          h(BtnPrimary, { label: "+ Adicionar", onClick: function() { setShowModal(true); }, small: true })
+        ),
+        data.length === 0 ? h(EmptyState, { message: "Nenhum historico familiar registrado" }) :
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+            data.map(function(f) {
+              return h("div", { key: f.id, style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 } },
+                h("span", { style: { fontSize: 18 } }, "🦸"),
+                h("div", { style: { flex: 1 } },
+                  h("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--t1)" } }, f.condition),
+                  h("div", { style: { fontSize: 12, color: "var(--t3)", marginTop: 2 } }, f.relationship + (f.notes ? " · " + f.notes : ""))
+                )
+              );
+            })
+          ),
+        showModal && h(Modal, { title: "Historico Familiar", onClose: function() { setShowModal(false); } },
+          h(FormField, { label: "Parentesco" },
+            h("select", { value: form.relationship, onChange: function(e) { setF("relationship", e.target.value); }, style: iSt() },
+              h("option", { value: "pai" }, "Pai"), h("option", { value: "mae" }, "Mae"),
+              h("option", { value: "irmao" }, "Irmao"), h("option", { value: "irma" }, "Irma"),
+              h("option", { value: "avo_paterno" }, "Avo Paterno"), h("option", { value: "avo_materno" }, "Avo Materno"),
+              h("option", { value: "avo_paterna" }, "Avo Paterna"), h("option", { value: "avo_materna" }, "Avo Materna"),
+              h("option", { value: "tio" }, "Tio/Tia"), h("option", { value: "outro" }, "Outro")
+            )
+          ),
+          h(FormField, { label: "Condicao/Doenca *" }, h("input", { type: "text", value: form.condition, onChange: function(e) { setF("condition", e.target.value); }, placeholder: "Ex: Diabetes tipo 2, Hipertensao", style: iSt() })),
+          h(FormField, { label: "Observacoes" }, h("textarea", { value: form.notes, onChange: function(e) { setF("notes", e.target.value); }, rows: 2, placeholder: "Informacoes adicionais...", style: iSt({ resize: "vertical" }) })),
+          h(ModalFooter, { onClose: function() { setShowModal(false); }, onSave: handleCreate, saving: saving, saveLabel: "Adicionar" })
+        )
+      );
+    }
+
+    function TabHistorico({ patientId }) {
+      var [subTab, setSubTab] = React.useState("medications");
+      var subs = [{ id: "medications", label: "Medicamentos" }, { id: "allergies", label: "Alergias" }, { id: "vaccines", label: "Vacinas" }, { id: "family", label: "Hist. Familiar" }];
+      return h("div", { className: "fi", style: { display: "flex", flexDirection: "column", gap: 16 } },
+        h("div", { style: { display: "flex", gap: 4, background: "#F1F5F9", borderRadius: "var(--radius-md)", padding: 4 } },
+          subs.map(function(s) {
+            var isA = subTab === s.id;
+            return h("button", { key: s.id, onClick: function() { setSubTab(s.id); }, style: { flex: 1, padding: "8px 4px", border: "none", borderRadius: "var(--radius-sm)", background: isA ? "#fff" : "transparent", color: isA ? "var(--accent)" : "var(--t3)", fontSize: 13, fontWeight: isA ? 600 : 500, cursor: "pointer", boxShadow: isA ? "var(--shadow-sm)" : "none", transition: "all 150ms", fontFamily: "Inter" } }, s.label);
+          })
+        ),
+        h("div", { style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-lg)", padding: "20px 24px", boxShadow: "var(--shadow-sm)" } },
+          subTab === "medications" && h(SubMedications, { patientId: patientId }),
+          subTab === "allergies"   && h(SubAllergies,   { patientId: patientId }),
+          subTab === "vaccines"    && h(SubVaccines,    { patientId: patientId }),
+          subTab === "family"      && h(SubFamilyHistory,{ patientId: patientId })
+        )
+      );
+    }
+
+    /* ---- Tab Exames ---- */
+    function TabExames({ patientId }) {
+      var [data, setData]           = React.useState([]);
+      var [loading, setLoading]     = React.useState(true);
+      var [showModal, setShowModal] = React.useState(false);
+      var [saving, setSaving]       = React.useState(false);
+      var [form, setForm] = React.useState({ examsText: "", urgency: "rotina", clinical_indication: "", request_date: "" });
+      React.useEffect(function() {
+        setForm(function(p) { return Object.assign({}, p, { request_date: todayDate() }); });
+        q("/prontuario/patient/" + patientId + "/exams")
+          .then(function(r) { if (r && Array.isArray(r)) setData(r); })
+          .finally(function() { setLoading(false); });
+      }, [patientId]);
+      function handleCreate() {
+        var examsArr = form.examsText.split("\n").map(function(e) { return e.trim(); }).filter(Boolean);
+        if (examsArr.length === 0) return;
+        setSaving(true);
+        var payload = { exams: examsArr.map(function(name) { return { name: name }; }), urgency: form.urgency, clinical_indication: form.clinical_indication, request_date: form.request_date, patient_id: patientId };
+        q("/prontuario/patient/" + patientId + "/exams", { method: "POST", body: JSON.stringify(payload) })
+          .then(function(r) { if (r && r.id) { setData(function(p) { return [r].concat(p); }); setShowModal(false); setForm({ examsText: "", urgency: "rotina", clinical_indication: "", request_date: todayDate() }); } })
+          .finally(function() { setSaving(false); });
+      }
+      function setF(k, v) { setForm(function(p) { var o = {}; o[k] = v; return Object.assign({}, p, o); }); }
+      var urgC = { rotina: { bg: "var(--accent-bg)", c: "var(--accent)" }, urgente: { bg: "var(--accent-a-bg)", c: "var(--accent-a)" }, emergencia: { bg: "var(--accent-r-bg)", c: "var(--accent-r)" } };
+      return h("div", { className: "fi", style: { display: "flex", flexDirection: "column", gap: 16 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--t1)", margin: 0 } }, "Solicitacoes de Exames"),
+          h(BtnPrimary, { label: "+ Solicitar Exames", onClick: function() { setShowModal(true); } })
+        ),
+        loading ? h(LoadingSkel) :
+        data.length === 0 ? h(EmptyState, { message: "Nenhuma solicitacao de exame registrada" }) :
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
+            data.map(function(ex) {
+              var uc = urgC[ex.urgency] || urgC.rotina;
+              var exList = Array.isArray(ex.exams) ? ex.exams : [];
+              return h("div", { key: ex.id, style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: "16px 20px", boxShadow: "var(--shadow-sm)" } },
+                h("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: exList.length > 0 ? 10 : 0 } },
+                  h("span", { style: { fontSize: 12, fontFamily: "JetBrains Mono", color: "var(--t3)" } }, fmtDate(ex.request_date)),
+                  h("span", { style: { flex: 1 } }),
+                  h("span", { style: { fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 9999, background: uc.bg, color: uc.c } }, ex.urgency),
+                  h(StatusBadge, { status: ex.status })
+                ),
+                exList.length > 0 && h("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: ex.clinical_indication ? 8 : 0 } },
+                  exList.map(function(e, i) {
+                    var name = typeof e === "string" ? e : (e.name || JSON.stringify(e));
+                    return h("span", { key: i, style: { fontSize: 12, background: "#F8FAFC", border: "1px solid var(--bdr)", borderRadius: 6, padding: "3px 10px", color: "var(--t2)" } }, name);
+                  })
+                ),
+                ex.clinical_indication && h("div", { style: { fontSize: 12, color: "var(--t3)", fontStyle: "italic" } }, "Indicacao: " + ex.clinical_indication)
+              );
+            })
+          ),
+        showModal && h(Modal, { title: "Solicitar Exames", onClose: function() { setShowModal(false); } },
+          h(FormField, { label: "Exames (um por linha) *" }, h("textarea", { value: form.examsText, onChange: function(e) { setF("examsText", e.target.value); }, rows: 5, placeholder: "Hemograma completo\nGlicemia de jejum\nCreatinina", style: iSt({ resize: "vertical" }) })),
+          h(FormField, { label: "Urgencia" },
+            h("select", { value: form.urgency, onChange: function(e) { setF("urgency", e.target.value); }, style: iSt() },
+              h("option", { value: "rotina" }, "Rotina"), h("option", { value: "urgente" }, "Urgente"), h("option", { value: "emergencia" }, "Emergencia")
+            )
+          ),
+          h(FormField, { label: "Indicacao Clinica" }, h("textarea", { value: form.clinical_indication, onChange: function(e) { setF("clinical_indication", e.target.value); }, rows: 2, placeholder: "Indicacao clinica...", style: iSt({ resize: "vertical" }) })),
+          h(FormField, { label: "Data da Solicitacao" }, h("input", { type: "date", value: form.request_date, onChange: function(e) { setF("request_date", e.target.value); }, style: iSt() })),
+          h(ModalFooter, { onClose: function() { setShowModal(false); }, onSave: handleCreate, saving: saving, saveLabel: "Solicitar" })
+        )
+      );
+    }
+
+    /* ---- Tab Documentos ---- */
+    function TabDocumentos({ patientId }) {
+      var [data, setData]           = React.useState([]);
+      var [loading, setLoading]     = React.useState(true);
+      var [showModal, setShowModal] = React.useState(false);
+      var [saving, setSaving]       = React.useState(false);
+      var [form, setForm] = React.useState({ document_type: "laudo", document_name: "", description: "", file_url: "" });
+      React.useEffect(function() {
+        q("/prontuario/patient/" + patientId + "/documents")
+          .then(function(r) { if (r && Array.isArray(r)) setData(r); })
+          .finally(function() { setLoading(false); });
+      }, [patientId]);
+      function handleCreate() {
+        if (!form.document_name.trim()) return;
+        setSaving(true);
+        q("/prontuario/patient/" + patientId + "/documents", { method: "POST", body: JSON.stringify(form) })
+          .then(function(r) { if (r && r.id) { setData(function(p) { return [r].concat(p); }); setShowModal(false); setForm({ document_type: "laudo", document_name: "", description: "", file_url: "" }); } })
+          .finally(function() { setSaving(false); });
+      }
+      function setF(k, v) { setForm(function(p) { var o = {}; o[k] = v; return Object.assign({}, p, o); }); }
+      var docI = { laudo: "📝", receita: "📜", exame: "🔬", imagem: "🧠", outros: "📄" };
+      return h("div", { className: "fi", style: { display: "flex", flexDirection: "column", gap: 16 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--t1)", margin: 0 } }, "Documentos"),
+          h(BtnPrimary, { label: "+ Registrar Documento", onClick: function() { setShowModal(true); } })
+        ),
+        loading ? h(LoadingSkel) :
+        data.length === 0 ? h(EmptyState, { message: "Nenhum documento registrado" }) :
+          h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 } },
+            data.map(function(doc) {
+              var icon = docI[doc.document_type] || docI.outros;
+              return h("div", { key: doc.id, onClick: doc.file_url ? function() { window.open(doc.file_url, "_blank"); } : null,
+                style: { background: "var(--card)", border: "1px solid var(--bdr)", borderRadius: "var(--radius-md)", padding: 16, boxShadow: "var(--shadow-sm)", cursor: doc.file_url ? "pointer" : "default" } },
+                h("div", { style: { fontSize: 24, marginBottom: 8 } }, icon),
+                h("div", { style: { fontSize: 13, fontWeight: 600, color: "var(--t1)", marginBottom: 4 } }, doc.document_name),
+                h("div", { style: { fontSize: 11, color: "var(--t3)", marginBottom: 6 } }, fmtDate(doc.created_at)),
+                doc.description && h("div", { style: { fontSize: 12, color: "var(--t2)", marginBottom: 6 } }, doc.description),
+                h("span", { style: { fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 9999, background: "var(--accent-bg)", color: "var(--accent)" } }, doc.document_type)
+              );
+            })
+          ),
+        showModal && h(Modal, { title: "Registrar Documento", onClose: function() { setShowModal(false); } },
+          h(FormField, { label: "Tipo" },
+            h("select", { value: form.document_type, onChange: function(e) { setF("document_type", e.target.value); }, style: iSt() },
+              h("option", { value: "laudo" }, "Laudo"), h("option", { value: "receita" }, "Receita"),
+              h("option", { value: "exame" }, "Resultado de Exame"), h("option", { value: "imagem" }, "Imagem (RX, TC...)"),
+              h("option", { value: "outros" }, "Outros")
+            )
+          ),
+          h(FormField, { label: "Nome do Documento *" }, h("input", { type: "text", value: form.document_name, onChange: function(e) { setF("document_name", e.target.value); }, placeholder: "Ex: Hemograma 04/2025", style: iSt() })),
+          h(FormField, { label: "Descricao" }, h("textarea", { value: form.description, onChange: function(e) { setF("description", e.target.value); }, rows: 2, placeholder: "Breve descricao...", style: iSt({ resize: "vertical" }) })),
+          h(FormField, { label: "URL do Arquivo (opcional)" }, h("input", { type: "url", value: form.file_url, onChange: function(e) { setF("file_url", e.target.value); }, placeholder: "https://...", style: iSt() })),
+          h(ModalFooter, { onClose: function() { setShowModal(false); }, onSave: handleCreate, saving: saving, saveLabel: "Registrar" })
+        )
+      );
+    }
+
+    /* ---- MainArea (tabs container) ---- */
+    function MainArea({ summary, activeTab, setActiveTab, patientId }) {
+      var tabs = [
+        { id: "resumo",     label: "Resumo" },
+        { id: "consultas",  label: "Consultas" },
+        { id: "historico",  label: "Historico" },
+        { id: "exames",     label: "Exames" },
+        { id: "documentos", label: "Documentos" }
+      ];
+      return h("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" } },
+        h("div", { style: { background: "#FFFFFF", borderBottom: "1px solid var(--bdr)", padding: "0 24px", display: "flex", flexShrink: 0 } },
+          tabs.map(function(t) {
+            var isA = activeTab === t.id;
+            return h("button", { key: t.id, onClick: function() { setActiveTab(t.id); }, style: { padding: "14px 20px", background: "none", border: "none", borderBottom: isA ? "2px solid var(--accent)" : "2px solid transparent", color: isA ? "var(--accent)" : "var(--t3)", fontSize: 14, fontWeight: isA ? 600 : 500, cursor: "pointer", transition: "all 150ms", fontFamily: "Inter", marginBottom: -1 } }, t.label);
+          })
+        ),
+        h("div", { style: { flex: 1, overflowY: "auto", padding: 24 } },
+          activeTab === "resumo"     && h(TabResumo,     { summary: summary }),
+          activeTab === "consultas"  && h(TabConsultas,  { patientId: patientId }),
+          activeTab === "historico"  && h(TabHistorico,  { patientId: patientId }),
+          activeTab === "exames"     && h(TabExames,     { patientId: patientId }),
+          activeTab === "documentos" && h(TabDocumentos, { patientId: patientId })
+        )
+      );
+    }
+
+    /* ---- Sidebar ---- */
+    function Sidebar({ summary }) {
+      var p       = summary.patient           || {};
+      var record  = summary.record            || {};
+      var vitals  = summary.latest_vitals;
+      var allerg  = summary.allergies         || [];
+      var meds    = summary.active_medications|| [];
+      var bmi     = calcBMI(record.weight_kg, record.height_cm);
+      return h("div", { className: "pr-sidebar", style: { width: 280, background: "#FFFFFF", borderRight: "1px solid var(--bdr)", overflowY: "auto", flexShrink: 0, padding: "20px 16px", display: "flex", flexDirection: "column", gap: 20 } },
+        h("div", { className: "fi", style: { textAlign: "center", paddingBottom: 16, borderBottom: "1px solid var(--bdr)" } },
+          h("div", { style: { width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-l) 100%)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px", boxShadow: "var(--shadow-lg)" } },
+            h("span", { style: { color: "#fff", fontSize: 22, fontWeight: 700, fontFamily: "Inter" } }, getInitials(p.name))
+          ),
+          h("div", { style: { fontSize: 16, fontWeight: 700, color: "var(--t1)", marginBottom: 4 } }, p.name || "--"),
+          h("div", { style: { fontSize: 12, color: "var(--t3)" } }, calcAge(p.birth_date) + (p.birth_date ? " · " + fmtDate(p.birth_date) : "")),
+          p.cpf   && h("div", { style: { fontSize: 12, color: "var(--t3)", marginTop: 2 } }, "CPF: " + p.cpf),
+          p.phone && h("div", { style: { fontSize: 12, color: "var(--t2)", marginTop: 4, fontWeight: 500 } }, p.phone)
+        ),
+        h(SidebarSection, { label: "DADOS CLINICOS" },
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+            h(SidebarItem, { label: "Tipo Sanguineo", value: record.blood_type, highlight: true }),
+            h(SidebarItem, { label: "Altura", value: record.height_cm ? record.height_cm + " cm" : null }),
+            h(SidebarItem, { label: "Peso",   value: record.weight_kg ? record.weight_kg + " kg" : null }),
+            bmi && h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0" } },
+              h("span", { style: { fontSize: 12, color: "var(--t3)" } }, "IMC"),
+              h("span", { style: { fontSize: 12, fontWeight: 600, color: bmi.color, fontFamily: "JetBrains Mono" } }, bmi.value + " · " + bmi.label)
+            )
+          )
+        ),
+        h(SidebarSection, { label: "ALERTAS CRITICOS" },
+          allerg.length === 0
+            ? h("div", { style: { fontSize: 12, color: "var(--t3)", fontStyle: "italic" } }, "Nenhuma alergia registrada")
+            : h("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+                allerg.map(function(a, i) {
+                  return h("div", { key: i, style: { background: "var(--accent-r-bg)", borderRadius: "var(--radius-sm)", padding: "6px 10px", fontSize: 12, fontWeight: 600, color: "var(--accent-r)", display: "flex", alignItems: "center", gap: 6 } },
+                    h("span", null, "⚠"),
+                    h("span", { style: { flex: 1 } }, a.allergen),
+                    (a.severity === "grave" || a.severity === "anafilaxia") && h("span", { style: { fontSize: 10, textTransform: "uppercase", opacity: 0.8 } }, a.severity)
+                  );
+                })
+              )
+        ),
+        meds.length > 0 && h(SidebarSection, { label: "MEDICAMENTOS ATIVOS" },
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+            meds.slice(0, 5).map(function(m, i) {
+              return h("div", { key: i, style: { fontSize: 12, color: "var(--t2)", padding: "4px 0", borderBottom: "1px solid var(--bdr)" } },
+                h("span", null, "💊 "),
+                h("span", { style: { fontWeight: 600, color: "var(--t1)" } }, m.name),
+                m.dosage && h("span", { style: { color: "var(--t3)" } }, " · " + m.dosage)
+              );
+            }),
+            meds.length > 5 && h("div", { style: { fontSize: 11, color: "var(--t3)", textAlign: "center", paddingTop: 4 } }, "+ " + (meds.length - 5) + " mais")
+          )
+        ),
+        vitals && h(SidebarSection, { label: "ULTIMOS SINAIS VITAIS" },
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+            h("div", { style: { fontSize: 10, color: "var(--t3)", marginBottom: 4 } }, fmtDate(vitals.measured_at)),
+            vitals.blood_pressure_systolic && h(VitalItem, { label: "PA",   value: vitals.blood_pressure_systolic + "/" + vitals.blood_pressure_diastolic + " mmHg" }),
+            vitals.heart_rate              && h(VitalItem, { label: "FC",   value: vitals.heart_rate + " bpm" }),
+            vitals.temperature             && h(VitalItem, { label: "Temp", value: vitals.temperature + " °C" }),
+            vitals.oxygen_saturation       && h(VitalItem, { label: "SpO2", value: vitals.oxygen_saturation + "%" })
+          )
+        )
+      );
+    }
+
+    /* ---- Topbar ---- */
+    function Topbar({ patient, onNovaConsulta }) {
+      return h("div", { style: { height: 60, background: "#FFFFFF", borderBottom: "1px solid var(--bdr)", display: "flex", alignItems: "center", padding: "0 24px", justifyContent: "space-between", flexShrink: 0, boxShadow: "0 1px 0 var(--bdr)" } },
+        h("div", { style: { display: "flex", alignItems: "center", gap: 16 } },
+          h("button", { onClick: function() { window.location.href = "/crm/"; }, style: { display: "flex", alignItems: "center", gap: 6, background: "none", border: "1px solid var(--bdr)", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: "pointer", color: "var(--t2)", fontSize: 13, fontWeight: 500 } }, "← Voltar"),
+          h("div", { style: { width: 1, height: 24, background: "var(--bdr)" } }),
+          h("span", { style: { fontSize: 13, fontWeight: 600, color: "var(--accent)", letterSpacing: "-.01em" } }, "CLINICORE")
+        ),
+        h("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+          h("span", { style: { fontSize: 16, fontWeight: 700, color: "var(--t1)" } }, patient ? patient.name : "--"),
+          h("span", { style: { background: "var(--accent-bg)", color: "var(--accent)", fontSize: 11, fontWeight: 600, padding: "2px 10px", borderRadius: 9999, letterSpacing: ".02em" } }, "PRONTUARIO ELETRONICO")
+        ),
+        h("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+          h("button", { onClick: onNovaConsulta, style: { background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: "0 2px 8px rgba(11,138,111,.25)", fontFamily: "Inter" } }, "+ Nova Consulta"),
+          h("button", { onClick: logout, style: { background: "none", border: "none", color: "var(--t3)", fontSize: 12, cursor: "pointer" } }, "Sair")
+        )
+      );
+    }
+
+    /* ---- App Root ---- */
+    function App() {
+      var [loading, setLoading]       = React.useState(true);
+      var [summary, setSummary]       = React.useState(null);
+      var [activeTab, setActiveTab]   = React.useState("resumo");
+      var [error, setError]           = React.useState(null);
+      var patientId = getPatientId();
+      React.useEffect(function() {
+        if (!patientId) { setError("ID do paciente nao informado. Use ?id=UUID_DO_PACIENTE"); setLoading(false); return; }
+        initToken().then(function(token) {
+          if (!token) { window.location.href = "/crm/login.html"; return null; }
+          return q("/prontuario/patient/" + patientId + "/summary");
+        }).then(function(data) {
+          if (!data) return;
+          if (data.error) { setError(data.error); return; }
+          setSummary(data);
+        }).catch(function() {
+          setError("Erro ao carregar prontuario. Verifique sua conexao.");
+        }).finally(function() { setLoading(false); });
+      }, []);
+      if (loading)  return h(LoadingScreen);
+      if (error)    return h(ErrorScreen, { message: error });
+      if (!summary) return h(ErrorScreen, { message: "Prontuario nao encontrado" });
+      function goConsultas() { setActiveTab("consultas"); }
+      return h("div", { style: { display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)", fontFamily: "Inter, sans-serif" } },
+        h(Topbar, { patient: summary.patient, onNovaConsulta: goConsultas }),
+        h("div", { style: { display: "flex", flex: 1, overflow: "hidden" } },
+          h(Sidebar, { summary: summary }),
+          h(MainArea, { summary: summary, activeTab: activeTab, setActiveTab: setActiveTab, patientId: patientId })
+        )
+      );
+    }
+
+    var root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(h(App));
+  </script>
+</body>
+</html>
