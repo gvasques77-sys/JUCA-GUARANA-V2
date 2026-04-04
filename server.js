@@ -27,6 +27,7 @@ import adminBillingRoutes from './routes/adminBillingRoutes.js';
 import adminAlertRoutes from './routes/adminAlertRoutes.js';
 import adminOnboardingRoutes from './routes/adminOnboardingRoutes.js';
 import { trackAiUsage } from './services/usageTracker.js';
+import createProntuarioRouter from './routes/prontuarioRoutes.js';
 import { getClinicWhatsAppConfig } from './services/whatsappConfigHelper.js';
 import { markAsReadAndSimulateTyping } from './services/whatsappTyping.js';
 
@@ -386,6 +387,9 @@ app.use('/crm/api/campaigns', authMiddleware(supabase), campaignRoutes);
 
 // — F10: Financial Intelligence API —
 app.use('/crm/api/financial', authMiddleware(supabase), financialRoutes);
+
+// — F11: Prontuário Eletrônico —
+app.use('/crm/api/prontuario', authMiddleware(supabase), createProntuarioRouter(supabase));
 
 // — CRM Dashboard API (montada aqui porque depende do supabase client) —
 app.use('/crm/api', createCrmApiRouter(supabase));
