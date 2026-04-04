@@ -297,5 +297,65 @@ export default function createProntuarioRouter(supabase) {
     } catch (err) { return res.status(500).json({ error: 'Erro ao registrar documento' }); }
   });
 
+  // ============================================================
+  // LARA ASSIST — IA de suporte ao atendimento medico
+  // ============================================================
+
+  /**
+   * POST /lara-assist
+   * Recebe contexto da consulta e retorna sugestao da IA.
+   * action: 'soap' | 'cid' | 'resumo' | 'exames' | 'interacoes'
+   */
+  router.post('/lara-assist', async (req, res) => {
+    const { action, context } = req.body;
+    const { clinicId } = req;
+
+    if (!action || !context) {
+      return res.status(400).json({ error: 'action e context sao obrigatorios' });
+    }
+
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    const OPENAI_MODEL   = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+    if (!OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'OpenAI nao configurada no servidor' });
+    }
+
+    const prompts = {
+      soap: 'Voce e a Lara, assistente medica de IA do CLINICORE. Com base na queixa e contexto abaixo, gere um rascunho estruturado de nota SOAP (Subjetivo, Objetivo, Avaliacao, Plano) para auxiliar o medico. Seja clinico, objetivo e use terminologia medica adequada. Deixe claro que e um rascunho para o medico revisar.\n\nContexto: ' + context,
+      cid: 'Voce e a Lara, assistente medica de IA do CLINICORE. Com base nos sintomas e queixa abaixo, sugira os 3 CIDs mais provaveis com codigo e descricao. Formato: "CID | Descricao | Justificativa breve". Seja objetivo.\n\nContexto: ' + context,
+      resumo: 'Voce e a Lara, assistente medica de IA do CLINICORE. Faca um resumo clinico estruturado do paciente com base nas informacoes abaixo. Destaque: diagnosticos ativos, medicamentos em uso, alergias, e ultimas consultas. Use linguagem medica precisa.\n\nContexto: ' + context,
+      exames: 'Voce e a Lara, assistente medica de IA do CLINICORE. Com base no diagnostico e queixa abaixo, sugira os exames complementares mais pertinentes. Para cada exame, indique a justificativa clinica. Seja objetivo e pratico.\n\nContexto: ' + context,
+      interacoes: 'Voce e a Lara, assistente medica de IA do CLINICORE. Analise a lista de medicamentos abaixo e identifique possiveis interacoes medicamentosas relevantes. Para cada interacao encontrada, indique o nivel de gravidade (leve/moderada/grave) e a conduta recomendada. Se nao houver interacoes relevantes, informe isso claramente.\n\nMedicamentos: ' + context,
+    };
+
+    const prompt = prompts[action];
+    if (!prompt) {
+      return res.status(400).json({ error: 'action invalida. Use: soap, cid, resumo, exames, interacoes' });
+    }
+
+    try {
+      const { default: OpenAI } = await import('openai');
+      const openaiClient = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+      const completion = await openaiClient.chat.completions.create({
+        model: OPENAI_MODEL,
+        messages: [
+          { role: 'system', content: 'Voce e a Lara, assistente medica de IA do CLINICORE. Responda sempre em portugues brasileiro. Seja clinico, preciso e conciso. Nunca substitua o julgamento medico — voce auxilia, nao decide.' },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 800,
+        temperature: 0.4,
+      });
+
+      const resposta = completion.choices[0] && completion.choices[0].message && completion.choices[0].message.content ? completion.choices[0].message.content : 'Sem resposta da IA.';
+      return res.json({ result: resposta, action, tokens: completion.usage ? completion.usage.total_tokens : 0 });
+
+    } catch (err) {
+      console.error('[LARA ASSIST] Erro OpenAI:', err.message);
+      return res.status(500).json({ error: 'Erro ao chamar IA: ' + err.message });
+    }
+  });
+
   return router;
 }

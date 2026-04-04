@@ -43,6 +43,14 @@
     .badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
     .save-indicator { font-size: 11px; color: var(--accent); font-weight: 500; opacity: 0; transition: opacity 400ms; }
     .save-indicator.visible { opacity: 1; }
+    .lara-panel { width: 320px; background: #fff; border-left: 1px solid var(--bdr); display: flex; flex-direction: column; flex-shrink: 0; transition: width 250ms var(--ease-out); overflow: hidden; }
+    .lara-panel.collapsed { width: 0; border-left: none; }
+    .lara-action-btn { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--bdr); border-radius: var(--radius-sm); background: #fff; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--t2); font-family: Inter; transition: all 150ms; text-align: left; width: 100%; }
+    .lara-action-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+    .lara-action-btn.loading { opacity: .6; cursor: not-allowed; }
+    .lara-result { font-size: 13px; color: var(--t1); line-height: 1.75; white-space: pre-wrap; background: var(--bg); border-radius: var(--radius-md); padding: 14px 16px; border: 1px solid var(--bdr); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+    .lara-thinking { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--accent); font-weight: 500; animation: pulse 1.4s ease-in-out infinite; padding: 12px 0; }
   </style>
 </head>
 <body>
@@ -135,7 +143,7 @@
     }
 
     /* ---- Topbar ---- */
-    function Topbar({ patient, consulta, saving, saved, onFinalize }) {
+    function Topbar({ patient, consulta, saving, saved, onFinalize, onToggleLara, laraOpen }) {
       var statusColors = { em_andamento: { bg: 'var(--accent-b-bg)', c: 'var(--accent-b)' }, finalizada: { bg: 'var(--accent-bg)', c: 'var(--accent)' }, cancelada: { bg: '#F1F5F9', c: 'var(--t3)' } };
       var sc = consulta ? (statusColors[consulta.status] || statusColors.em_andamento) : statusColors.em_andamento;
       return h('div', { style: { height: 60, background: '#fff', borderBottom: '1px solid var(--bdr)', display: 'flex', alignItems: 'center', padding: '0 24px', gap: 16, flexShrink: 0, boxShadow: '0 1px 0 var(--bdr)' } },
@@ -148,6 +156,10 @@
         consulta && h('span', { className: 'badge', style: { background: sc.bg, color: sc.c } }, consulta.status ? consulta.status.replace(/_/g, ' ') : '--'),
         h('div', { className: 'save-indicator' + (saved ? ' visible' : '') }, '\u2713 Salvo'),
         saving && h('div', { style: { fontSize: 11, color: 'var(--t3)' } }, 'Salvando...'),
+        h('button', {
+          onClick: onToggleLara,
+          style: { background: laraOpen ? 'var(--accent-bg)' : 'transparent', color: laraOpen ? 'var(--accent)' : 'var(--t3)', border: '1px solid ' + (laraOpen ? 'var(--accent)' : 'var(--bdr)'), borderRadius: 'var(--radius-sm)', padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter', transition: 'all 150ms', display: 'flex', alignItems: 'center', gap: 6 }
+        }, h('span', null, '\u2728'), laraOpen ? 'Fechar Lara' : 'Lara Assist'),
         consulta && consulta.status !== 'finalizada' && h('button', { className: 'btn-primary', onClick: onFinalize, style: { padding: '8px 20px' } }, '\u2713 Finalizar Consulta'),
         h('button', { onClick: logout, style: { background: 'none', border: 'none', color: 'var(--t3)', fontSize: 12, cursor: 'pointer' } }, 'Sair')
       );
@@ -379,6 +391,110 @@
       );
     }
 
+    /* ---- Lara Assist Panel ---- */
+    function LaraPanel({ collapsed, consulta, patient, allergies, activeMeds }) {
+      var [loading, setLoading]         = React.useState(false);
+      var [result, setResult]           = React.useState(null);
+      var [activeAction, setActiveAction] = React.useState(null);
+
+      function buildContext(action) {
+        var parts = [];
+        if (patient && patient.name) parts.push('Paciente: ' + patient.name);
+        if (consulta.chief_complaint) parts.push('Queixa: ' + consulta.chief_complaint);
+        if (action === 'resumo') {
+          if (allergies && allergies.length > 0) parts.push('Alergias: ' + allergies.map(function(a) { return a.allergen; }).join(', '));
+          if (activeMeds && activeMeds.length > 0) parts.push('Medicamentos em uso: ' + activeMeds.map(function(m) { return m.name + (m.dosage ? ' ' + m.dosage : ''); }).join(', '));
+        }
+        if (action === 'interacoes') {
+          if (activeMeds && activeMeds.length > 0) return activeMeds.map(function(m) { return m.name + (m.dosage ? ' ' + m.dosage : ''); }).join(', ');
+          return 'Nenhum medicamento ativo registrado.';
+        }
+        if (action === 'soap') {
+          if (consulta.soap_subjective) parts.push('Subjetivo ja registrado: ' + consulta.soap_subjective);
+          if (consulta.soap_objective)  parts.push('Objetivo ja registrado: '  + consulta.soap_objective);
+        }
+        if (action === 'cid' || action === 'exames') {
+          if (consulta.soap_subjective) parts.push('Subjetivo: ' + consulta.soap_subjective);
+          if (consulta.soap_assessment) parts.push('Avaliacao: ' + consulta.soap_assessment);
+        }
+        return parts.join('\n');
+      }
+
+      function runAction(action) {
+        if (loading) return;
+        var ctx = buildContext(action);
+        setActiveAction(action);
+        setLoading(true);
+        setResult(null);
+        fetch('/crm/api/prontuario/lara-assist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getToken() },
+          body: JSON.stringify({ action: action, context: ctx })
+        }).then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data && data.result) setResult({ text: data.result, action: action, tokens: data.tokens });
+            else setResult({ text: 'Nao foi possivel obter resposta da IA.', action: action, tokens: 0 });
+          })
+          .catch(function() { setResult({ text: 'Erro de conexao. Tente novamente.', action: action, tokens: 0 }); })
+          .finally(function() { setLoading(false); });
+      }
+
+      var actions = [
+        { id: 'soap',        icon: '\uD83D\uDCDD', label: 'Gerar rascunho SOAP',  desc: 'IA escreve S, O, A, P baseado na queixa' },
+        { id: 'cid',         icon: '\uD83D\uDD2C', label: 'Sugerir CID-10',       desc: 'Top 3 diagnosticos provaveis' },
+        { id: 'resumo',      icon: '\uD83D\uDCCB', label: 'Resumir historico',    desc: 'Visao geral clinica do paciente' },
+        { id: 'exames',      icon: '\uD83E\uDDEA', label: 'Sugerir exames',       desc: 'Exames pertinentes ao caso' },
+        { id: 'interacoes',  icon: '\u26A0\uFE0F',  label: 'Checar interacoes',   desc: 'Analisa medicamentos em uso' }
+      ];
+
+      if (collapsed) return null;
+
+      return h('div', { className: 'lara-panel' },
+        /* Header */
+        h('div', { style: { padding: '16px 20px', borderBottom: '1px solid var(--bdr)', flexShrink: 0 } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+            h('div', { style: { width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-l) 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 } }, '\u2728'),
+            h('div', null,
+              h('div', { style: { fontSize: 13, fontWeight: 700, color: 'var(--t1)' } }, 'Lara Assist'),
+              h('div', { style: { fontSize: 10, color: 'var(--t3)' } }, 'IA de suporte ao atendimento')
+            )
+          )
+        ),
+        /* Acoes */
+        h('div', { style: { padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 } },
+          h('div', { style: { fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 } }, 'O QUE POSSO FAZER'),
+          actions.map(function(a) {
+            var isActive = activeAction === a.id && loading;
+            return h('button', { key: a.id, className: 'lara-action-btn' + (isActive ? ' loading' : ''), onClick: function() { runAction(a.id); } },
+              h('span', { style: { fontSize: 16 } }, a.icon),
+              h('div', { style: { flex: 1, textAlign: 'left' } },
+                h('div', { style: { fontWeight: 600, color: activeAction === a.id ? 'var(--accent)' : 'var(--t2)', fontSize: 12 } }, a.label),
+                h('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 1 } }, a.desc)
+              ),
+              isActive && h('div', { style: { width: 14, height: 14, border: '2px solid var(--bdr)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 } })
+            );
+          })
+        ),
+        /* Resultado */
+        h('div', { style: { flex: 1, overflowY: 'auto', padding: '0 20px 20px' } },
+          loading && h('div', { className: 'lara-thinking' },
+            h('div', { style: { width: 14, height: 14, border: '2px solid var(--bdr)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite' } }),
+            'Lara esta pensando...'
+          ),
+          result && h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+              h('div', { style: { fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em' } },
+                (function() { var found = actions.find(function(a) { return a.id === result.action; }); return found ? found.label : result.action; })()
+              ),
+              result.tokens > 0 && h('div', { style: { fontSize: 10, color: 'var(--t3)' } }, result.tokens + ' tokens')
+            ),
+            h('div', { className: 'lara-result' }, result.text),
+            h('div', { style: { fontSize: 11, color: 'var(--t3)', fontStyle: 'italic', textAlign: 'center', paddingTop: 4 } }, 'Revise antes de usar — a IA auxilia, nao substitui o medico')
+          )
+        )
+      );
+    }
+
     /* ---- App principal ---- */
     function App() {
       var [loading, setLoading]     = React.useState(true);
@@ -387,8 +503,10 @@
       var [consulta, setConsulta]   = React.useState(null);
       var [vitals, setVitals]       = React.useState(null);
       var [allergies, setAllergies] = React.useState([]);
-      var [saving, setSaving]       = React.useState(false);
-      var [saved, setSaved]         = React.useState(false);
+      var [saving, setSaving]         = React.useState(false);
+      var [saved, setSaved]           = React.useState(false);
+      var [laraOpen, setLaraOpen]     = React.useState(true);
+      var [activeMeds, setActiveMeds] = React.useState([]);
       var saveTimer = React.useRef(null);
 
       var consultaId = params.consultaId;
@@ -413,6 +531,9 @@
           setPatient(consultaData.patients || null);
           setVitals(vitalsData && Array.isArray(vitalsData) && vitalsData[0] ? vitalsData[0] : null);
           setAllergies(Array.isArray(allergyData) ? allergyData : []);
+          // Carregar medicamentos ativos para checar interacoes
+          q('/prontuario/patient/' + patientId + '/medications?active=true')
+            .then(function(r) { if (r && Array.isArray(r)) setActiveMeds(r); });
         }).catch(function(e) {
           setError('Erro ao carregar dados: ' + e.message);
         }).finally(function() { setLoading(false); });
@@ -455,7 +576,7 @@
       if (!consulta) return h(ErrorFull, { msg: 'Consulta nao encontrada' });
 
       return h('div', { className: 'fi', style: { display: 'flex', flexDirection: 'column', height: '100vh' } },
-        h(Topbar, { patient: patient, consulta: consulta, saving: saving, saved: saved, onFinalize: handleFinalize }),
+        h(Topbar, { patient: patient, consulta: consulta, saving: saving, saved: saved, onFinalize: handleFinalize, onToggleLara: function() { setLaraOpen(function(p) { return !p; }); }, laraOpen: laraOpen }),
         h('div', { style: { flex: 1, display: 'flex', overflow: 'hidden' } },
           h(Sidebar, { patient: patient, consulta: consulta, vitals: vitals, allergies: allergies }),
           h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' } },
@@ -463,7 +584,8 @@
               h(SOAPEditor, { consulta: consulta, onChange: handleChange, onSave: handleSave, saving: saving })
             ),
             h(PainelInferior, { consulta: consulta, onChange: handleChange, onSave: handleSave, patientId: patientId, consultaId: consultaId })
-          )
+          ),
+          h(LaraPanel, { collapsed: !laraOpen, consulta: consulta, patient: patient, allergies: allergies, activeMeds: activeMeds })
         )
       );
     }
