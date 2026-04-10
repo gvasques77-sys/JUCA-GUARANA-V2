@@ -3,6 +3,20 @@
 // latência Lara, volume de mensagens). Protegido pelo superadminMiddleware
 // (JWT do gv_admins). Usa service_role do Supabase para bypassar RLS.
 //
+// Fonte de dados (Sprint 0):
+//   - clinic_ai_usage  (tabela pré-existente do F8, estendida com purpose,
+//                       cached_tokens, latency_ms, success, error_message,
+//                       request_id via migration sprint0_010_extend_clinic_ai_usage)
+//   - lara_latency_log (tabela nova criada via sprint0_011_create_lara_latency_log)
+//
+// Mapeamento de colunas (F8 legado ↔ Sprint 0):
+//   tokens_input  = prompt tokens
+//   tokens_output = completion tokens
+//   tokens_total  = GENERATED (tokens_input + tokens_output)
+//   cost_usd      = custo USD calculado
+//   usage_type    = categoria macro do F8 (conversation|task_processing|report|other)
+//   purpose       = categoria fina da Sprint 0 (lara_classification, crm_report_patient, ...)
+//
 // Endpoints:
 //   GET  /api/admin/metrics/openai-cost?period=7d&clinic_id=optional
 //   GET  /api/admin/metrics/lara-latency?period=7d&clinic_id=optional
@@ -64,6 +78,9 @@ async function loadClinicNames() {
 
 // -------------------------------------------------------
 // GET /api/admin/metrics/openai-cost
+// Lê de clinic_ai_usage (tabela do F8 estendida via Sprint 0).
+// Agrega por dia, por clínica, por purpose (granular) e também por
+// usage_type (compat com F8). Quem consome decide qual agregação usar.
 // -------------------------------------------------------
 router.get('/openai-cost', async (req, res) => {
   try {
@@ -71,8 +88,8 @@ router.get('/openai-cost', async (req, res) => {
     const clinicFilter = req.query.clinic_id || null;
 
     let query = supabase
-      .from('openai_usage_log')
-      .select('clinic_id, model, purpose, prompt_tokens, completion_tokens, cached_tokens, estimated_cost_usd, latency_ms, success, created_at')
+      .from('clinic_ai_usage')
+      .select('clinic_id, model, usage_type, purpose, tokens_input, tokens_output, cached_tokens, cost_usd, latency_ms, success, created_at')
       .gte('created_at', since.toISOString())
       .order('created_at', { ascending: false })
       .limit(50000);
@@ -89,10 +106,11 @@ router.get('/openai-cost', async (req, res) => {
     let totalUsd = 0;
     const byClinic = new Map();
     const byPurpose = new Map();
+    const byUsageType = new Map();
     const byDay = new Map();
 
     for (const r of list) {
-      const cost = parseFloat(r.estimated_cost_usd || 0);
+      const cost = parseFloat(r.cost_usd || 0);
       totalUsd += cost;
 
       // by clinic
@@ -109,9 +127,9 @@ router.get('/openai-cost', async (req, res) => {
       const cAgg = byClinic.get(cKey);
       cAgg.total_usd += cost;
       cAgg.calls += 1;
-      cAgg.tokens += (r.prompt_tokens || 0) + (r.completion_tokens || 0);
+      cAgg.tokens += (r.tokens_input || 0) + (r.tokens_output || 0);
 
-      // by purpose
+      // by purpose (granular — Sprint 0+)
       const pKey = r.purpose || 'unknown';
       if (!byPurpose.has(pKey)) {
         byPurpose.set(pKey, { purpose: pKey, total_usd: 0, calls: 0 });
@@ -119,6 +137,15 @@ router.get('/openai-cost', async (req, res) => {
       const pAgg = byPurpose.get(pKey);
       pAgg.total_usd += cost;
       pAgg.calls += 1;
+
+      // by usage_type (macro — compat F8)
+      const uKey = r.usage_type || 'unknown';
+      if (!byUsageType.has(uKey)) {
+        byUsageType.set(uKey, { usage_type: uKey, total_usd: 0, calls: 0 });
+      }
+      const uAgg = byUsageType.get(uKey);
+      uAgg.total_usd += cost;
+      uAgg.calls += 1;
 
       // by day
       const dKey = dayBucket(r.created_at);
@@ -140,6 +167,9 @@ router.get('/openai-cost', async (req, res) => {
         .sort((a, b) => b.total_usd - a.total_usd),
       by_purpose: Array.from(byPurpose.values())
         .map(p => ({ ...p, total_usd: parseFloat(p.total_usd.toFixed(6)) }))
+        .sort((a, b) => b.total_usd - a.total_usd),
+      by_usage_type: Array.from(byUsageType.values())
+        .map(u => ({ ...u, total_usd: parseFloat(u.total_usd.toFixed(6)) }))
         .sort((a, b) => b.total_usd - a.total_usd),
       by_day: Array.from(byDay.values())
         .map(d => ({ ...d, total_usd: parseFloat(d.total_usd.toFixed(6)) }))
