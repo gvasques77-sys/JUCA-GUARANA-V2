@@ -1,4 +1,9 @@
 import 'dotenv/config';
+// Sentry DEVE ser inicializado antes dos demais imports para permitir
+// instrumentação automática. Só ativa quando SENTRY_DSN existe.
+import { initSentry, Sentry, captureException as sentryCaptureException } from './lib/sentry.js';
+initSentry();
+
 import express from 'express';
 import cors from 'cors';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -26,7 +31,10 @@ import adminUsageRoutes from './routes/adminUsageRoutes.js';
 import adminBillingRoutes from './routes/adminBillingRoutes.js';
 import adminAlertRoutes from './routes/adminAlertRoutes.js';
 import adminOnboardingRoutes from './routes/adminOnboardingRoutes.js';
+import adminMetricsRoutes from './routes/adminMetricsRoutes.js';
 import { trackAiUsage } from './services/usageTracker.js';
+import { trackedChatCompletion } from './lib/openaiTracker.js';
+import { createLatencyTracker } from './lib/latencyTracker.js';
 import createProntuarioRouter from './routes/prontuarioRoutes.js';
 import { getClinicWhatsAppConfig } from './services/whatsappConfigHelper.js';
 import { markAsReadAndSimulateTyping } from './services/whatsappTyping.js';
@@ -402,6 +410,7 @@ app.use('/api/admin/clinics', adminClinicRoutes);
 app.use('/api/admin/usage', adminUsageRoutes);
 app.use('/api/admin/billing', adminBillingRoutes);
 app.use('/api/admin/alerts', adminAlertRoutes);
+app.use('/api/admin/metrics', adminMetricsRoutes);
 app.use('/api/admin', adminOnboardingRoutes);
 
 
@@ -1790,7 +1799,10 @@ async function maybeGenerateSummary(conversationHistory, state, openaiClient, cl
       .map(m => `${m.role}: ${m.content}`)
       .join('\n');
 
-    const summaryResponse = await openaiClient.chat.completions.create({
+    const summaryResponse = await trackedChatCompletion({
+      client: openaiClient,
+      clinicId,
+      purpose: 'lara_summary',
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       messages: [{
         role: 'user',
@@ -2121,7 +2133,7 @@ function detectSideQuestion(message, envelope) {
  * Responde uma dúvida lateral via LLM usando contexto da clínica.
  * Chamado quando paciente faz pergunta durante o fluxo de confirmação.
  */
-async function answerSideQuestion(question, state, clinicKb, previousMessages) {
+async function answerSideQuestion(question, state, clinicKb, previousMessages, clinicId) {
   const systemPrompt = `Você é uma secretária virtual de clínica médica chamada ${state.clinic_name || 'Lara'}.
 O paciente está no processo de confirmar um agendamento e fez uma pergunta antes de confirmar.
 Responda de forma clara, direta e amigável usando as informações disponíveis da clínica.
@@ -2143,7 +2155,10 @@ CONTEXTO DO AGENDAMENTO SENDO CONFIRMADO:
     { role: 'user', content: question },
   ];
 
-  const response = await openai.chat.completions.create({
+  const response = await trackedChatCompletion({
+    client: openai,
+    clinicId,
+    purpose: 'lara_side_question',
     model: 'gpt-4.1',
     messages,
     max_tokens: 200,
@@ -2156,7 +2171,7 @@ CONTEXTO DO AGENDAMENTO SENDO CONFIRMADO:
 /**
  * Responde perguntas do paciente após o agendamento ter sido confirmado.
  */
-async function answerPostBookingQuestion(question, state, clinicKb, previousMessages) {
+async function answerPostBookingQuestion(question, state, clinicKb, previousMessages, clinicId) {
   const systemPrompt = `Você é uma secretária virtual de clínica médica chamada ${state.clinic_name || 'Lara'}.
 O paciente acabou de confirmar um agendamento e fez uma pergunta adicional.
 Responda de forma clara, direta e amigável.
@@ -2180,7 +2195,10 @@ AGENDAMENTO CONFIRMADO:
     { role: 'user', content: question },
   ];
 
-  const response = await openai.chat.completions.create({
+  const response = await trackedChatCompletion({
+    client: openai,
+    clinicId,
+    purpose: 'lara_post_booking_question',
     model: 'gpt-4.1',
     messages,
     max_tokens: 250,
@@ -2216,6 +2234,10 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
 
   const envelope = parsed.data;
   console.log(`[PROCESS] envelope OK | from=${envelope.from} | clinic=${envelope.clinic_id} | msg="${(envelope.message_text || '').substring(0, 80)}"`);
+
+  // Sprint 0 — rastreador de latência ponta-a-ponta da Lara.
+  // Fire-and-forget: falhas nunca bloqueiam o fluxo principal.
+  const latencyTracker = createLatencyTracker(envelope.clinic_id, envelope.correlation_id);
 
   // Helper: parser JSON seguro
   const safeJsonParse = (s) => {
@@ -2400,6 +2422,9 @@ app.post('/process', verifyWebhookSignature, checkAgentAuth, async (req, res) =>
       console.warn('[ConversationTracker] Erro não-bloqueante:', trackingError.message);
       // NÃO interrompe o fluxo — tracking é best-effort
     }
+
+    // Sprint 0 — marcar fim do carregamento de contexto
+    latencyTracker.mark('context_loaded');
 
     // Acumuladores de usage da OpenAI (para tracking de custo)
     let totalTokensInput = 0;
@@ -3500,7 +3525,7 @@ if (conversationState?.booking_state === BOOKING_STATES.BOOKED && conversationSt
     } else {
       // Pergunta geral pós-booking → responder com LLM e contexto do agendamento
       const postAnswer = await answerPostBookingQuestion(
-        envelope.message_text, conversationState, kbContext, previousMessages
+        envelope.message_text, conversationState, kbContext, previousMessages, envelope.clinic_id
       );
       await saveConversationTurn({
         clinicId: envelope.clinic_id,
@@ -4037,16 +4062,19 @@ if (intentoDireto) {
   }
 
   if (!extracted) {
-  const extraction = await openai.chat.completions.create(
-    {
-      model: OPENAI_MODEL,
-      messages: messages,
-      tools: [tools[0]],
-      tool_choice: { type: 'function', function: { name: 'extract_intent' } },
-      temperature: 0.3,
-    },
-    { signal: controller.signal }
-  );
+  const extraction = await trackedChatCompletion({
+    client: openai,
+    clinicId: envelope.clinic_id,
+    purpose: 'lara_classification',
+    requestId: envelope.correlation_id,
+    requestOptions: { signal: controller.signal },
+    model: OPENAI_MODEL,
+    messages: messages,
+    tools: [tools[0]],
+    tool_choice: { type: 'function', function: { name: 'extract_intent' } },
+    temperature: 0.3,
+  });
+  latencyTracker.incrementOpenAI();
 
   // Acumular usage da chamada extract_intent
   if (extraction.usage) {
@@ -4691,7 +4719,7 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       } else {
         // NOVO: Detectar se é uma pergunta/dúvida lateral — responder e reexibir card
         if (detectSideQuestion(userSaidConfirmation, envelope)) {
-          const sideAnswer = await answerSideQuestion(userSaidConfirmation, updatedState, kbContext, previousMessages);
+          const sideAnswer = await answerSideQuestion(userSaidConfirmation, updatedState, kbContext, previousMessages, envelope.clinic_id);
           const confirmationCard = await buildConfirmationMessage(updatedState, updatedState.doctor_name, clinicRules?.name, envelope.clinic_id);
           const combinedResponse = `${sideAnswer}\n\n---\n${confirmationCard}`;
           await saveConversationTurn({
@@ -5196,37 +5224,40 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
     // 8) STEP 1: decide_next_action
     // ======================================================
     if (step < MAX_STEPS) {
-      const decision = await openai.chat.completions.create(
-        {
-          model: OPENAI_MODEL,
-          messages: [
-            {
-              role: 'system',
-              content: buildSystemPrompt(clinicRules, doctors, services, kbContext, updatedState) +
-                `\n\n## RESTRIÇÕES OPERACIONAIS\n` +
-                `allow_prices=${clinicRules.allow_prices}. ` +
-                (clinicRules.allow_prices === false ? 'Se pedir preço: decision_type=block_price.\n' : '\n') +
-                `Se faltar dado essencial: decision_type=ask_missing com pergunta direta (1 frase).\n` +
-                `Se tiver informação suficiente: decision_type=proceed.\n` +
-                `Sua saída DEVE ser via ferramenta decide_next_action.`,
-            },
-            // Incluir histórico para que o modelo saiba o que já foi respondido
-            ...previousMessages.map(msg => ({
-              role: msg.role === 'user' ? 'user' : 'assistant',
-              content: msg.content,
-            })),
-            {
-              // Fix: LLM precisa ver a mensagem original para decidir corretamente.
-              // Antes só recebia o objeto extracted (sem o texto do usuário).
-              role: 'user',
-              content: JSON.stringify({ message: envelope.message_text, extracted }),
-            },
-          ],
-          tools: [tools[1]],
-          tool_choice: { type: 'function', function: { name: 'decide_next_action' } },
-        },
-        { signal: controller.signal }
-      );
+      const decision = await trackedChatCompletion({
+        client: openai,
+        clinicId: envelope.clinic_id,
+        purpose: 'lara_decision',
+        requestId: envelope.correlation_id,
+        requestOptions: { signal: controller.signal },
+        model: OPENAI_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: buildSystemPrompt(clinicRules, doctors, services, kbContext, updatedState) +
+              `\n\n## RESTRIÇÕES OPERACIONAIS\n` +
+              `allow_prices=${clinicRules.allow_prices}. ` +
+              (clinicRules.allow_prices === false ? 'Se pedir preço: decision_type=block_price.\n' : '\n') +
+              `Se faltar dado essencial: decision_type=ask_missing com pergunta direta (1 frase).\n` +
+              `Se tiver informação suficiente: decision_type=proceed.\n` +
+              `Sua saída DEVE ser via ferramenta decide_next_action.`,
+          },
+          // Incluir histórico para que o modelo saiba o que já foi respondido
+          ...previousMessages.map(msg => ({
+            role: msg.role === 'user' ? 'user' : 'assistant',
+            content: msg.content,
+          })),
+          {
+            // Fix: LLM precisa ver a mensagem original para decidir corretamente.
+            // Antes só recebia o objeto extracted (sem o texto do usuário).
+            role: 'user',
+            content: JSON.stringify({ message: envelope.message_text, extracted }),
+          },
+        ],
+        tools: [tools[1]],
+        tool_choice: { type: 'function', function: { name: 'decide_next_action' } },
+      });
+      latencyTracker.incrementOpenAI();
 
       // Acumular usage da chamada decide_next_action
       if (decision.usage) {
@@ -5304,15 +5335,19 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       const toolCallCount = {};
       const MAX_CALLS_PER_TOOL = 1;
       while (agentStep < 3) {
-        const agentResp = await openai.chat.completions.create(
-          {
-            model: OPENAI_MODEL,
-            messages: agentMessages,
-            tools: schedulingToolsDefinitions,
-            temperature: 0.4,
-          },
-          { signal: controller.signal }
-        );
+        const agentResp = await trackedChatCompletion({
+          client: openai,
+          clinicId: envelope.clinic_id,
+          purpose: 'lara_scheduling_agent',
+          requestId: envelope.correlation_id,
+          metadata: { agent_step: agentStep },
+          requestOptions: { signal: controller.signal },
+          model: OPENAI_MODEL,
+          messages: agentMessages,
+          tools: schedulingToolsDefinitions,
+          temperature: 0.4,
+        });
+        latencyTracker.incrementOpenAI();
 
         // Acumular usage da chamada do scheduling agent
         if (agentResp.usage) {
@@ -5781,7 +5816,10 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       }
     }
 
-    return res.json({
+    // Sprint 0 — marcar fim do processamento OpenAI / início do envio
+    latencyTracker.mark('openai_done');
+
+    const response = res.json({
       correlation_id: envelope.correlation_id,
       final_message: decided.message,
       actions: finalActions,
@@ -5794,6 +5832,10 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
           }
         : undefined,
     });
+
+    // Sprint 0 — marcar envio como concluído (a resposta HTTP foi emitida)
+    latencyTracker.mark('whatsapp_sent');
+    return response;
   } catch (err) {
     clearTimeout(timeoutId);
     const errName = err?.name || 'UnknownError';
@@ -5835,6 +5877,14 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
         last_processed_at: '1970-01-01T00:00:00.000Z',
       }).catch(() => {});
     }
+
+    // Sprint 0 — finalizar rastreador de latência (fire-and-forget).
+    // res.headersSent = true → resposta foi enviada com sucesso.
+    try {
+      latencyTracker.finish(res.headersSent, {
+        errorStage: res.headersSent ? undefined : 'process_handler',
+      });
+    } catch (_e) { /* nunca derrubar o fluxo */ }
   }
 });
 
@@ -5845,6 +5895,15 @@ app.get("/health", async (req, res) => {
   const redisStatus = await redisHealthCheck();
   res.json({ ok: true, service: "agent-service", redis: redisStatus });
 });
+
+// Sentry error handler — DEVE ser registrado depois de todas as rotas
+// e antes de qualquer outro middleware de erro custom.
+// No-op se SENTRY_DSN não estiver definido.
+try {
+  Sentry.setupExpressErrorHandler(app);
+} catch (e) {
+  log.warn({ err: e?.message }, '[Sentry] setupExpressErrorHandler falhou — seguindo sem');
+}
 
 app.listen(PORT, "0.0.0.0", () => {
   log.info({ port: PORT }, '🚀 agent-service listening');

@@ -25,6 +25,7 @@ const BATCH_SIZE = 10; // processar no máximo 10 tarefas por ciclo
 
 // Status possíveis das tarefas
 import { getClinicWhatsAppConfig } from './whatsappConfigHelper.js';
+import { captureException as sentryCaptureException } from '../lib/sentry.js';
 
 const TASK_STATUS = {
   PENDING: 'pending',
@@ -344,6 +345,12 @@ async function processTaskCycle(supabase) {
       } catch (taskErr) {
         // Erro inesperado no processamento individual — não derrubar o ciclo
         console.error(`[TASK-PROCESSOR] Erro inesperado processando tarefa ${task.id}:`, taskErr.message);
+        sentryCaptureException(taskErr, {
+          module: 'taskProcessor',
+          jobType: task.task_type,
+          clinicId: task.clinic_id,
+          extra: { task_id: task.id, retry_count: task.retry_count },
+        });
         await supabase
           .from('crm_tasks')
           .update({
@@ -364,6 +371,7 @@ async function processTaskCycle(supabase) {
     return stats;
   } catch (error) {
     console.error(`[TASK-PROCESSOR] Erro no ciclo de processamento:`, error.message);
+    sentryCaptureException(error, { module: 'taskProcessor', jobType: 'cycle' });
     return stats;
   }
 }
