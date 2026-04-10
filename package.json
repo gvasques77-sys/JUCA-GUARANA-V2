@@ -12,6 +12,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@sentry/node": "^10.48.0",
+    "@sentry/profiling-node": "^10.48.0",
     "@supabase/supabase-js": "^2.95.3",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",

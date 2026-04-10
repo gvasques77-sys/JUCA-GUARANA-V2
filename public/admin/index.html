@@ -2070,6 +2070,7 @@ function Sidebar(props) {
     { id: 'dashboard', label: 'Dashboard', icon: 'o', section: 'PLATAFORMA' },
     { id: 'clinics', label: 'Clinicas', icon: '#', section: null },
     { id: 'usage', label: 'Uso de Tokens', icon: '~', section: null },
+    { id: 'metrics', label: 'Metricas', icon: '%', section: null, href: '/admin/metrics.html' },
     { id: 'billing', label: 'Billing', icon: '$', section: null },
     { id: 'alerts', label: 'Alertas', icon: '!', section: null },
     { id: 'onboarding', label: 'Nova Clinica', icon: '+', section: 'GESTAO' },
@@ -2087,7 +2088,10 @@ function Sidebar(props) {
           item.section ? h('div', { className: 'nav-section' }, item.section) : null,
           h('button', {
             className: 'nav-item' + (props.page === item.id ? ' active' : ''),
-            onClick: function() { props.onNavigate(item.id); }
+            onClick: function() {
+              if (item.href) { window.location.href = item.href; return; }
+              props.onNavigate(item.id);
+            }
           },
             h('span', { className: 'icon' }, item.icon),
             item.label,

@@ -10,7 +10,9 @@
  * - Busca clinic_id e role na tabela clinic_users
  * - Prefixo [AUTH] em todos os logs
  * - Usa o mesmo supabase client passado pelo router (não cria outro)
+ * - Sprint 0: seta clinic_id no Sentry scope para tagueamento de eventos
  */
+import { setClinicContext } from '../lib/sentry.js';
 
 // Cache simples para evitar queries repetidas à clinic_users (TTL 5 min)
 const userCache = new Map();
@@ -93,6 +95,10 @@ export function authMiddleware(supabase) {
       req.clinicId = clinicUser.clinic_id;
       req.userRole = clinicUser.role;
       req.userName = user.email;
+
+      // Sentry: tagueia a isolation scope com clinic_id para todos os eventos
+      // disparados no contexto desta request.
+      setClinicContext(clinicUser.clinic_id);
 
       next();
     } catch (err) {

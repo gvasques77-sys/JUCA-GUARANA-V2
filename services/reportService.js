@@ -14,6 +14,7 @@
 
 import OpenAI from 'openai';
 import { trackAiUsage } from './usageTracker.js';
+import { trackedChatCompletion } from '../lib/openaiTracker.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'missing' });
 
@@ -316,7 +317,11 @@ Gere um relatório individual que inclua:
 Formato: texto corrido em português BR, tom profissional, use emojis com moderação.
 Máximo 400 palavras.`;
 
-    const response = await openai.chat.completions.create({
+    const response = await trackedChatCompletion({
+      client: openai,
+      clinicId,
+      purpose: 'crm_report_patient',
+      metadata: { patient_id: patientId },
       model,
       messages: [
         {
@@ -424,7 +429,10 @@ Formato: texto corrido em português BR, tom profissional mas acessível, use em
 Máximo 500 palavras. Seja direto e objetivo.`;
     }
 
-    const response = await openai.chat.completions.create({
+    const response = await trackedChatCompletion({
+      client: openai,
+      clinicId,
+      purpose: 'crm_report_overview',
       model,
       messages: [
         {

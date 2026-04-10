@@ -4,6 +4,7 @@
  */
 
 import { Router } from 'express';
+import { trackedChatCompletion } from '../lib/openaiTracker.js';
 import {
   getOrCreateRecord, updateRecord,
   createConsultation, getConsultations, getConsultation, updateConsultation,
@@ -338,7 +339,11 @@ export default function createProntuarioRouter(supabase) {
       const { default: OpenAI } = await import('openai');
       const openaiClient = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-      const completion = await openaiClient.chat.completions.create({
+      const completion = await trackedChatCompletion({
+        client: openaiClient,
+        clinicId,
+        purpose: 'prontuario_lara_assist',
+        metadata: { action },
         model: OPENAI_MODEL,
         messages: [
           { role: 'system', content: 'Voce e a Lara, assistente medica de IA do CLINICORE. Responda sempre em portugues brasileiro. Seja clinico, preciso e conciso. Nunca substitua o julgamento medico — voce auxilia, nao decide.' },
