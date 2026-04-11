@@ -1818,12 +1818,9 @@ async function maybeGenerateSummary(conversationHistory, state, openaiClient, cl
     const updatedState = { ...state, running_summary: summary, last_summary_at: new Date().toISOString() };
     console.log(`[SUMMARY] Generated: ${summary.substring(0, 80)}...`);
 
-    // F8B: Registrar tokens do summary (fire and forget)
-    if (clinicId && summaryResponse.usage) {
-      trackAiUsage(clinicId, 'conversation', summaryResponse, {
-        model: summaryResponse.model || process.env.OPENAI_MODEL || 'gpt-4o-mini'
-      }).catch(function(err) { console.error('[tracking] summary:', err.message); });
-    }
+    // Sprint 0: tracking agora é feito dentro de trackedChatCompletion
+    // (lib/openaiTracker.js) — o bloco legado trackAiUsage() foi removido
+    // para eliminar duplicação de linhas em clinic_ai_usage (DUP 1).
 
     return updatedState;
   } catch (e) {
@@ -5703,15 +5700,11 @@ console.log('📊 Estado após merge:', JSON.stringify(updatedState, null, 2));
       log.warn({ err: String(e) }, 'agent_logs_insert_failed');
     }
 
-    // F8B: Registrar uso acumulado da conversa (fire and forget)
-    if (totalTokensInput > 0 || totalTokensOutput > 0) {
-      trackAiUsage(envelope.clinic_id, 'conversation', null, {
-        tokensInput:  totalTokensInput,
-        tokensOutput: totalTokensOutput,
-        model:        process.env.OPENAI_MODEL || 'gpt-4.1',
-        correlation_id: envelope.correlation_id
-      }).catch(function(err) { console.error('[tracking] conversation:', err.message); });
-    }
+    // Sprint 0: tracking agregado foi removido. Cada chamada OpenAI da
+    // conversa já é registrada individualmente em clinic_ai_usage via
+    // trackedChatCompletion (lib/openaiTracker.js) com purpose granular
+    // (lara_classification, lara_decision, lara_scheduling_agent, etc).
+    // O bloco legado trackAiUsage() agregado causava duplicação (DUP 2).
 
     // ======================================================
     // 11) SALVAR HISTÓRICO + RESPOSTA FINAL
