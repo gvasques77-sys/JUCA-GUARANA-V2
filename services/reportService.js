@@ -340,9 +340,9 @@ Máximo 400 palavras.`;
     const outputCost = ((response.usage?.completion_tokens || 0) / 1_000_000) * 8.00;
     const costEstimated = parseFloat((inputCost + outputCost).toFixed(6));
 
-    // F8B: Registrar uso do relatório de paciente (fire and forget)
-    trackAiUsage(clinicId, 'report', response, { report_type: 'patient' })
-      .catch(err => console.error('[tracking] patient_report:', err.message));
+    // Sprint 0: tracking agora é feito dentro de trackedChatCompletion
+    // (lib/openaiTracker.js) com purpose='crm_report_patient'. O bloco legado
+    // trackAiUsage() foi removido para eliminar duplicação em clinic_ai_usage (DUP 3).
 
     // 8. Salvar em crm_reports
     const now = new Date();
@@ -455,11 +455,9 @@ Máximo 500 palavras. Seja direto e objetivo.`;
 
     console.log(`[REPORT] Análise gerada: ${text.length} chars, ${tokensUsed} tokens, $${costEstimated}`);
 
-    // F8B: Registrar uso do relatório CRM (fire and forget)
-    if (clinicId) {
-      trackAiUsage(clinicId, 'report', response, { report_type: 'crm_overview' })
-        .catch(err => console.error('[tracking] crm_report:', err.message));
-    }
+    // Sprint 0: tracking agora é feito dentro de trackedChatCompletion
+    // (lib/openaiTracker.js) com purpose='crm_report_overview'. O bloco legado
+    // trackAiUsage() foi removido para eliminar duplicação em clinic_ai_usage (DUP 4).
 
     return {
       success: true,
